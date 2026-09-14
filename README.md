@@ -6,6 +6,13 @@
 
 与 [codex-opencode-setup](https://github.com/BitQAI/codex-opencode-setup) 是姊妹项目：那边配置 Codex，这边配置 Claude Code，共用同一个 OpenCode Go API Key。
 
+本仓库包含两部分，按需取用：
+
+| 目录 | 目标 | 写到哪里 |
+|---|---|---|
+| 根目录（`setup-claude-opencode.sh`） | 终端 `claude` CLI、IDE 扩展、桌面端内置的 Claude Code 会话 | `~/.claude/settings.json` |
+| [`desktop/`](/desktop)（`setup-desktop-opencode.sh`） | Claude Desktop 的 **Chat / Cowork**（第三方推理 3P 本地网关） | `Claude-3p` profile + `~/.claude-desktop-opencode/` |
+
 ---
 
 ## 一、架构总览
@@ -104,6 +111,10 @@ cd ClaudeCode-opencode-setup && bash setup-claude-opencode.sh
 2. 实测 `settings.json` 的 `env` **优先级高于进程环境变量**（把 `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` 设成垃圾值，Claude Code 仍按 settings.json 走 opencode 并成功返回），因此桌面端注入自己的 provider 环境也不会顶掉这份配置；
 3. 桌面端设置里的"环境变量"页（`ccd-environment-config`，内容用系统钥匙串加密存储）因此**不需要再填**，一般保持为空即可；
 4. 改完配置需**完全退出并重启 Claude.app**，否则它继续用旧的环境快照。
+
+> 注意区分：以上说的是桌面端里跑的 **Claude Code 会话**（`Code` 标签，读 `~/.claude/settings.json`）。
+> 桌面端的 **Chat / Cowork** 走的是服务端推理，需要 [`desktop/`](/desktop) 里的 3P 本地网关方案，
+> 两者互不影响，可分别安装。
 
 ### 完成
 
@@ -301,3 +312,29 @@ claude -p "Use the Bash tool to run exactly: echo TOOL_OK" --allowedTools Bash -
 - 目前**只提供 bash 版脚本**（macOS / Linux / Windows Git Bash 均可用，脚本内已做 Windows 路径与 `python` 命令适配）。PowerShell 版尚未提供：本机没有 Windows/PowerShell 环境，无法验证，按"没验证不发"的原则暂不附上。
 - 默认模型映射针对 OpenCode Go 订阅中的 DeepSeek 系列；若要用 `glm-5.2`、`kimi-k3` 等，直接改 `settings.json` 里对应的模型名即可（`/models` 或 `curl $BASE_URL/v1/models` 可列出全部可用模型）。
 - 端点与模型清单由 OpenCode 控制，可能变动；`deepseek-v4.1-flash` 为当前默认。
+
+---
+
+## 十一、桌面端（Claude Desktop 的 Chat / Cowork）
+
+Claude Desktop 的 Chat / Projects / Cowork 是 **Anthropic 服务端推理**，不读 `~/.claude/settings.json`，
+所以上面的 CLI 方案管不到它。桌面端从 `1.40609` 起支持官方"第三方推理（3P）"模式，但实测有三个硬约束：
+桌面端**只接受 Anthropic 风格模型名**、OpenCode Go **不认 `claude-*` 名字**、桌面端**直连第三方会被凭据探测拦住**。
+
+因此 [`desktop/`](/desktop) 提供一个小型本地网关：桌面端看到的仍是 `claude-sonnet-4-5` / `claude-opus-4-5` /
+`claude-haiku-4-5`，请求到网关后被改写成 `deepseek-v4.1-flash` / `deepseek-v4-pro` / `deepseek-v4-flash`
+并强制 `effort=max`，再转发到 OpenCode Go。**Sonnet 槽位默认就是 `deepseek-v4.1-flash` + `max`。**
+
+```bash
+git clone https://github.com/BitQAI/ClaudeCode-opencode-setup.git
+cd ClaudeCode-opencode-setup/desktop
+bash setup-desktop-opencode.sh           # 安装（首次会问 Key）
+bash setup-desktop-opencode.sh --status  # 查看状态
+bash setup-desktop-opencode.sh --restore # 一键还原
+```
+
+细节、实测证据与排错见 [desktop/README.md](/desktop/README.md)：
+
+- 网关只监听 `127.0.0.1`，Key 存在 `~/.claude-desktop-opencode/config.json`（`600`），桌面端 profile 里放的是占位 Key；
+- **不需要自签证书**：桌面端接受 loopback 上的 http（实测 `allowLoopbackHttp: true`），比"必须套 HTTPS"的方案少动一层系统；
+- 每个新会话会多一笔"标题生成"请求（走 Haiku 槽）；默认保持官方行为，`--local-title on` 可让网关本地应答，省掉这一笔。

@@ -6,6 +6,13 @@ Configure **Claude Code** to run on models from an **OpenCode Go** subscription.
 
 Sister project of [codex-opencode-setup](https://github.com/BitQAI/codex-opencode-setup): that one configures Codex, this one configures Claude Code — both share the same OpenCode Go API key.
 
+This repo ships two parts:
+
+| Path | Target | Writes to |
+|---|---|---|
+| root (`setup-claude-opencode.sh`) | terminal `claude` CLI, IDE extensions, Claude Desktop's built-in Claude Code sessions | `~/.claude/settings.json` |
+| [`desktop/`](/desktop) (`setup-desktop-opencode.sh`) | Claude Desktop **Chat / Cowork** (third-party inference via a 3P local gateway) | `Claude-3p` profile + `~/.claude-desktop-opencode/` |
+
 ---
 
 ## 1. Architecture
@@ -99,6 +106,10 @@ Change it with `--effort low|medium|high|xhigh|max`.
 2. `settings.json`'s `env` **outranks process environment variables** (verified: junk `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` in the process env still routed to opencode successfully), so the provider env the desktop injects cannot override this config;
 3. The desktop's own "environment variables" page (`ccd-environment-config`, encrypted via the OS keychain) therefore does **not** need to be filled in;
 4. Fully quit and relaunch Claude.app after changing the config.
+
+> Note the distinction: the above covers the **Claude Code sessions** inside Desktop (the `Code` tab, which reads
+> `~/.claude/settings.json`). Desktop's **Chat / Cowork** runs on Anthropic server-side inference and needs the
+> 3P local gateway in [`desktop/`](/desktop). The two never interfere and can be installed independently.
 
 ---
 
@@ -226,3 +237,34 @@ claude -p "Use the Bash tool to run exactly: echo TOOL_OK" --allowedTools Bash -
 
 - Only the bash installer is shipped (works on macOS, Linux and Windows Git Bash — it handles Windows paths and the `python` command name). A PowerShell version is intentionally omitted: there is no Windows/PowerShell environment available to verify it, and unverified code is not shipped here.
 - Default mapping targets the DeepSeek models inside OpenCode Go. Switch to `glm-5.2`, `kimi-k3`, etc. by editing the model names in `settings.json` (`curl $BASE_URL/v1/models` lists everything available).
+
+---
+
+## 10. Desktop edition (Claude Desktop Chat / Cowork)
+
+Desktop's Chat / Projects / Cowork run on **Anthropic server-side inference** and never read `~/.claude/settings.json`,
+so the CLI setup above cannot reach them. Since `1.40609` Desktop ships an official "third-party inference" (3P) mode,
+but three constraints were measured: Desktop **only accepts Anthropic-style model ids**, OpenCode Go **rejects
+`claude-*` names**, and Desktop **blocks direct calls to third-party providers**.
+
+[`desktop/`](/desktop) therefore ships a small loopback gateway: Desktop still sees `claude-sonnet-4-5` /
+`claude-opus-4-5` / `claude-haiku-4-5`, the gateway rewrites them to `deepseek-v4.1-flash` / `deepseek-v4-pro` /
+`deepseek-v4-flash`, forces `effort=max`, and forwards to OpenCode Go. **The Sonnet slot defaults to
+`deepseek-v4.1-flash` + `max`.**
+
+```bash
+git clone https://github.com/BitQAI/ClaudeCode-opencode-setup.git
+cd ClaudeCode-opencode-setup/desktop
+bash setup-desktop-opencode.sh           # install (prompts for the key on first run)
+bash setup-desktop-opencode.sh --status  # status
+bash setup-desktop-opencode.sh --restore # roll back
+```
+
+Details, measurements and troubleshooting: [desktop/README.en.md](/desktop/README.en.md).
+
+- The gateway binds `127.0.0.1` only; the key lives in `~/.claude-desktop-opencode/config.json` (`600`) and the
+  Desktop profile carries a placeholder key.
+- **No self-signed certificate needed**: Desktop accepts plain http on loopback (measured `allowLoopbackHttp: true`),
+  one system layer less than the commonly shared "wrap it in HTTPS" recipe.
+- Each new session sends one extra "title generation" request (Haiku slot); stock behaviour is preserved by default,
+  and `--local-title on` lets the gateway answer it locally.
