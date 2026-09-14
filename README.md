@@ -71,12 +71,39 @@ cd ClaudeCode-opencode-setup && bash setup-claude-opencode.sh
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4.1-flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash"
+    "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max"
   }
 }
 ```
 
 > 原有 `permissions` / `hooks` / `model` / `skipDangerousModePermissionPrompt` 等字段保持不变。
+
+### 模型档位映射（默认档 = Sonnet）
+
+| Claude Code 档位 | 实际模型 | 说明 |
+|---|---|---|
+| **默认 / Sonnet** | `deepseek-v4.1-flash` | 主力档，**推理强度 max**，原生多模态（文本 + 图片） |
+| Opus（`/model opus`） | `deepseek-v4-pro` | 更强推理档 |
+| Haiku | `deepseek-v4-flash` | 背景小任务（标题生成、探测、摘要），快且便宜 |
+| 子代理 | `deepseek-v4.1-flash` | 由 `CLAUDE_CODE_SUBAGENT_MODEL` 控制 |
+
+**推理强度 max** 由 `CLAUDE_CODE_EFFORT_LEVEL=max` 控制（它覆盖 `settings.json` 里的 `effortLevel`，后者合法取值只有 `low|medium|high|xhigh`）。抓包确认 Claude Code 会把它作为请求体字段发出，OpenCode Go 接受并正常返回：
+
+```json
+{"model":"deepseek-v4.1-flash","thinking":{"type":"adaptive"},"output_config":{"effort":"max"}, ...}
+```
+
+改强度：`--effort low|medium|high|xhigh|max`。
+
+### 桌面端（Claude Desktop 内置的 Claude Code）同样生效
+
+`/Applications/Claude.app` 里的 Claude Code 会话与本仓库的 CLI 配置共用同一套用户设置：
+
+1. 它创建会话时用的 `settingSources` 是 `['user','project','local']`，即**读取 `~/.claude/settings.json`**；
+2. 实测 `settings.json` 的 `env` **优先级高于进程环境变量**（把 `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` 设成垃圾值，Claude Code 仍按 settings.json 走 opencode 并成功返回），因此桌面端注入自己的 provider 环境也不会顶掉这份配置；
+3. 桌面端设置里的"环境变量"页（`ccd-environment-config`，内容用系统钥匙串加密存储）因此**不需要再填**，一般保持为空即可；
+4. 改完配置需**完全退出并重启 Claude.app**，否则它继续用旧的环境快照。
 
 ### 完成
 
@@ -176,6 +203,9 @@ claude -p "Reply with exactly: PONG"
 bash ~/.claude/claude-opencode-setup/setup-claude-opencode.sh --key
 bash ~/.claude/claude-opencode-setup/setup-claude-opencode.sh --key sk-xxxx
 
+# 设置推理强度（默认 max；也可用 low|medium|high|xhigh）
+bash ~/.claude/claude-opencode-setup/setup-claude-opencode.sh --effort max
+
 # 查看当前配置 + 端点连通性自检
 bash ~/.claude/claude-opencode-setup/setup-claude-opencode.sh --status
 
@@ -222,6 +252,10 @@ claude -p "Use the Bash tool to run exactly: echo TOOL_OK" --allowedTools Bash -
 | Haiku 档映射 | 同一次会话的辅助请求 | 命中 `deepseek-v4-flash`（`modelUsage` 可见） |
 | 图片理解 | image block → `deepseek-v4.1-flash` | `"Red"` |
 | 模型可用性 | `deepseek-v4.1-flash` / `deepseek-v4-flash` / `deepseek-v4-pro` | 均 `200` |
+| 默认档 = Sonnet 映射 | 会话默认 `model: sonnet` | 实际请求模型 `deepseek-v4.1-flash` |
+| 推理强度 max | `CLAUDE_CODE_EFFORT_LEVEL=max` | 请求体含 `output_config.effort="max"` + `thinking: adaptive`，`200` 返回 `PONG`（无告警） |
+| settings 覆盖进程环境 | 垃圾 `ANTHROPIC_BASE_URL`/`API_KEY` + 正常 settings | 仍走 opencode 成功（`is_error:false`） |
+| 桌面端会话设置源 | `Claude.app` 内 `settingSources=['user','project','local']` | 读取 `~/.claude/settings.json` |
 
 ---
 

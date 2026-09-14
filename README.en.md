@@ -68,12 +68,37 @@ Resulting `~/.claude/settings.json`:
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4.1-flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash"
+    "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max"
   }
 }
 ```
 
 Restart Claude Code (open a new terminal) and run `claude` in any project.
+
+### Model slot mapping (default slot = Sonnet)
+
+| Claude Code slot | Actual model | Notes |
+|---|---|---|
+| **Default / Sonnet** | `deepseek-v4.1-flash` | primary slot, **effort = max**, native multimodal (text + image) |
+| Opus (`/model opus`) | `deepseek-v4-pro` | stronger reasoning slot |
+| Haiku | `deepseek-v4-flash` | background work (titles, probes, summaries), fast and cheap |
+| Subagents | `deepseek-v4.1-flash` | via `CLAUDE_CODE_SUBAGENT_MODEL` |
+
+`CLAUDE_CODE_EFFORT_LEVEL=max` drives the effort level (it overrides the `effortLevel` setting, whose schema only allows `low|medium|high|xhigh`). Captured requests confirm it is sent to the API and accepted by OpenCode Go:
+
+```json
+{"model":"deepseek-v4.1-flash","thinking":{"type":"adaptive"},"output_config":{"effort":"max"}, ...}
+```
+
+Change it with `--effort low|medium|high|xhigh|max`.
+
+### Claude Desktop's built-in Claude Code works the same way
+
+1. Its sessions are created with `settingSources: ['user','project','local']` — i.e. it reads `~/.claude/settings.json`;
+2. `settings.json`'s `env` **outranks process environment variables** (verified: junk `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` in the process env still routed to opencode successfully), so the provider env the desktop injects cannot override this config;
+3. The desktop's own "environment variables" page (`ccd-environment-config`, encrypted via the OS keychain) therefore does **not** need to be filled in;
+4. Fully quit and relaunch Claude.app after changing the config.
 
 ---
 
@@ -134,6 +159,7 @@ SCRIPT=~/.claude/claude-opencode-setup/setup-claude-opencode.sh
 bash $SCRIPT            # install / re-apply
 bash $SCRIPT --key      # view or change the API key (interactive)
 bash $SCRIPT --key sk-xxxx
+bash $SCRIPT --effort max  # reasoning effort (default max: low|medium|high|xhigh|max)
 bash $SCRIPT --status   # show config + endpoint connectivity check
 bash $SCRIPT --update   # fetch the latest script from GitHub and redeploy
 bash $SCRIPT --restore  # roll back to the pre-install state
@@ -167,6 +193,10 @@ claude -p "Use the Bash tool to run exactly: echo TOOL_OK" --allowedTools Bash -
 | Haiku slot mapping | auxiliary calls hit `deepseek-v4-flash` |
 | Image input | red 64×64 PNG → `"Red"` |
 | Model availability | `deepseek-v4.1-flash` / `deepseek-v4-flash` / `deepseek-v4-pro` all `200` |
+| Default slot = Sonnet | session default `model: sonnet` → actual request model `deepseek-v4.1-flash` |
+| Effort max | `CLAUDE_CODE_EFFORT_LEVEL=max` → request carries `output_config.effort="max"` + `thinking: adaptive`, `200` with no warning |
+| settings beats process env | junk `ANTHROPIC_BASE_URL`/`API_KEY` + valid settings → still routed to opencode (`is_error:false`) |
+| Desktop session setting source | `Claude.app` uses `settingSources=['user','project','local']` |
 
 ---
 

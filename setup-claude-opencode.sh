@@ -26,6 +26,8 @@ MODEL_MAIN_DEFAULT="deepseek-v4.1-flash"
 MODEL_OPUS_DEFAULT="deepseek-v4-pro"
 MODEL_SONNET_DEFAULT="deepseek-v4.1-flash"
 MODEL_HAIKU_DEFAULT="deepseek-v4-flash"
+# 默认档（Sonnet）= deepseek-v4.1-flash，推理强度拉满
+EFFORT_DEFAULT="max"
 
 # ---------- 输出 ----------
 if [ -t 1 ]; then
@@ -44,6 +46,7 @@ Claude Code × OpenCode Go 配置脚本 v${SCRIPT_VERSION}
 
   (无参数)            安装或更新配置（备份现有设置，写入 opencode Go 端点）
   --key [sk-xxxx]     查看 / 设置 API Key（省略值时交互输入）
+  --effort <level>    设置推理强度（low|medium|high|xhigh|max，默认 max）
   --status            显示当前配置、脱敏 Key 与端点连通性
   --restore           还原到安装前状态（含移除 API Key 授权记录）
   --update            从 GitHub 拉取最新脚本并重新部署
@@ -145,12 +148,12 @@ verify_endpoint() {
 apply_settings() {
   mkdir -p "$CLAUDE_DIR"
   "$PYTHON" - "$SETTINGS_FILE" "$API_KEY" "$BASE_URL" \
-      "$MODEL_MAIN" "$MODEL_OPUS" "$MODEL_SONNET" "$MODEL_HAIKU" <<'PY'
+      "$MODEL_MAIN" "$MODEL_OPUS" "$MODEL_SONNET" "$MODEL_HAIKU" "$EFFORT" <<'PY'
 import json
 import os
 import sys
 
-path, key, base, main, opus, sonnet, haiku = sys.argv[1:8]
+path, key, base, main, opus, sonnet, haiku, effort = sys.argv[1:9]
 data = {}
 if os.path.exists(path):
     raw = open(path, encoding="utf-8").read().strip()
@@ -166,6 +169,7 @@ env.update({
     "ANTHROPIC_DEFAULT_SONNET_MODEL": sonnet,
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku,
     "CLAUDE_CODE_SUBAGENT_MODEL": main,
+    "CLAUDE_CODE_EFFORT_LEVEL": effort,
 })
 # opencode Go 的 /v1/messages 只认 x-api-key，Bearer 会返回 401 Missing API key
 env.pop("ANTHROPIC_AUTH_TOKEN", None)
@@ -229,9 +233,18 @@ backup_once() {
   ok "已备份到 $BACKUP_DIR"
 }
 
+# 只保留"首次安装前"那一份备份，重复运行不会覆盖它，保证 --restore 能回到最初状态
+ensure_backup() {
+  if [ -f "$MANIFEST_FILE" ]; then
+    info "已存在安装前备份（$BACKUP_DIR），保留不覆盖"
+    return 0
+  fi
+  backup_once
+}
+
 do_install() {
   mkdir -p "$CLAUDE_DIR"
-  backup_once
+  ensure_backup
   load_key
   [ -n "$API_KEY" ] || ask_key
 
@@ -251,6 +264,7 @@ do_install() {
   info "  ANTHROPIC_DEFAULT_OPUS_MODEL  = $MODEL_OPUS"
   info "  ANTHROPIC_DEFAULT_SONNET_MODEL= $MODEL_SONNET"
   info "  ANTHROPIC_DEFAULT_HAIKU_MODEL = $MODEL_HAIKU"
+  info "  CLAUDE_CODE_EFFORT_LEVEL     = $EFFORT"
 }
 
 install_self() {
@@ -276,7 +290,7 @@ install_self() {
 do_key() {
   load_key
   # 首次写入前先留一份可还原的备份；已安装过则保留最初那份
-  [ -f "$MANIFEST_FILE" ] || backup_once
+  ensure_backup
   local new_key="${1:-}"
   if [ -n "$new_key" ]; then
     API_KEY="$new_key"
@@ -290,6 +304,7 @@ do_key() {
   save_key "$API_KEY"
   apply_settings
   approve_api_key
+  install_self
   ok "已更新 Key：$(mask_key "$API_KEY")（重启 Claude Code 生效）"
 }
 
@@ -305,7 +320,7 @@ data = json.load(open(sys.argv[1], encoding="utf-8"))
 env = data.get("env", {})
 for k in ("ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
           "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-          "CLAUDE_CODE_SUBAGENT_MODEL"):
+          "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"):
     print(f"  {k:32s}= {env.get(k, '(未设置)')}")
 api_key = env.get("ANTHROPIC_API_KEY", "")
 print(f"  {'ANTHROPIC_API_KEY':32s}= {api_key[:7]}...{api_key[-4:]}" if api_key else "  ANTHROPIC_API_KEY                = (未设置)")
@@ -321,6 +336,27 @@ PY
   else
     warn "尚未配置 API Key，运行：bash $SCRIPT_NAME --key"
   fi
+}
+
+do_effort() {
+  local level="${1:-}"
+  if [ -n "$level" ]; then
+    EFFORT="$level"
+  else
+    printf '输入推理强度（low|medium|high|xhigh|max，默认 max）: ' >&2
+    read -r level || true
+    [ -n "$level" ] && EFFORT="$level"
+  fi
+  case "$EFFORT" in
+    low|medium|high|xhigh|max) ;;
+    *) die "无效的推理强度：$EFFORT（可选 low|medium|high|xhigh|max）" ;;
+  esac
+  load_key
+  [ -n "$API_KEY" ] || die "尚未配置 API Key，请先运行 --key。"
+  ensure_backup
+  save_key "$API_KEY"
+  apply_settings
+  ok "已设置推理强度：$EFFORT（重启 Claude Code 生效）"
 }
 
 do_restore() {
@@ -410,10 +446,12 @@ main() {
   MODEL_OPUS="$MODEL_OPUS_DEFAULT"
   MODEL_SONNET="$MODEL_SONNET_DEFAULT"
   MODEL_HAIKU="$MODEL_HAIKU_DEFAULT"
+  EFFORT="${OPENCODE_EFFORT:-$EFFORT_DEFAULT}"
 
   case "${1:-}" in
     ""|--install)  do_install ;;
     --key)         do_key "${2:-}" ;;
+    --effort)      do_effort "${2:-}" ;;
     --status)      do_status ;;
     --restore)     do_restore ;;
     --update)      do_update ;;
