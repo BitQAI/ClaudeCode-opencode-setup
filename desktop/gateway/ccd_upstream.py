@@ -58,9 +58,15 @@ def upstream_headers(client_headers, config: dict, session: str) -> dict:
     return headers
 
 
-def open_upstream(config: dict, path: str):
+def open_upstream(config: dict, path: str, connect_timeout: float = 30.0):
     host, base_path = upstream_parts(config["upstream_base_url"])
-    return http.client.HTTPSConnection(host, timeout=600), base_path + path
+    return http.client.HTTPSConnection(host, timeout=connect_timeout), base_path + path
+
+
+def set_read_timeout(conn, seconds: float) -> None:
+    """After the TLS handshake, allow the model to think for much longer."""
+    if conn.sock is not None:
+        conn.sock.settimeout(seconds)
 
 
 def is_title_request(payload: dict) -> bool:

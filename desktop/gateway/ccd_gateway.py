@@ -24,6 +24,9 @@ HOP_BY_HOP = {
     "host", "content-length", "connection", "keep-alive", "transfer-encoding",
     "proxy-connection", "te", "trailer", "upgrade", "accept-encoding",
 }
+# 由网关自己决定分帧与身份标识：上游的 content-length / server / date 一律丢弃，
+# 否则非流式响应会出现"既无长度也无 chunked"的歧义，客户端只能干等连接关闭。
+DROP_HEADERS = HOP_BY_HOP | {"content-length", "server", "date"}
 CHUNK = 2048
 
 
@@ -104,13 +107,32 @@ class Gateway(http.server.BaseHTTPRequestHandler):
         session = ccd_upstream.session_id(self.headers, payload)
         headers = ccd_upstream.upstream_headers(self.headers, self.config, session)
         body = json.dumps(payload, ensure_ascii=False).encode()
-        try:
-            conn, target = ccd_upstream.open_upstream(self.config, path)
-            conn.request("POST", target, body=body, headers=headers)
-            response = conn.getresponse()
-        except OSError as exc:
-            append_log(f"ERROR upstream unreachable: {exc}")
-            self.send_error_json(502, "api_error", f"upstream unreachable: {exc}")
+        attempts = max(1, int(self.config["upstream_retries"]) + 1)
+        conn = None
+        response = None
+        last_error: OSError | None = None
+        for attempt in range(1, attempts + 1):
+            attempt_started = time.time()
+            try:
+                conn, target = ccd_upstream.open_upstream(
+                    self.config, path, self.config["upstream_connect_timeout"])
+                conn.request("POST", target, body=body, headers=headers)
+                ccd_upstream.set_read_timeout(conn, self.config["upstream_read_timeout"])
+                response = conn.getresponse()
+                break
+            except OSError as exc:
+                last_error = exc
+                if conn is not None:
+                    conn.close()
+                    conn = None
+                elapsed = int((time.time() - attempt_started) * 1000)
+                append_log(f"WARN upstream attempt {attempt}/{attempts} failed after {elapsed}ms: "
+                           f"{type(exc).__name__}: {exc}")
+                if attempt < attempts:
+                    time.sleep(self.config["upstream_retry_backoff"] * attempt)
+        if response is None:
+            append_log(f"ERROR upstream unreachable after {attempts} attempt(s): {last_error}")
+            self.send_error_json(502, "api_error", f"upstream unreachable: {last_error}")
             return
         try:
             streaming = "text/event-stream" in (response.getheader("content-type") or "")
@@ -118,20 +140,28 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             elapsed = int((time.time() - started) * 1000)
             append_log(f"POST {path} {requested} -> {route['model']} "
                        f"effort={route['effort']} status={response.status} {elapsed}ms")
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            append_log(f"WARN client disconnected while relaying {requested}: {type(exc).__name__}")
         finally:
+            response.close()
             conn.close()
 
     def relay(self, response, streaming: bool) -> None:
-        self.send_response(response.status)
-        for key, value in response.getheaders():
-            if key.lower() not in HOP_BY_HOP:
-                self.send_header(key, value)
-        if streaming:
-            self.send_header("transfer-encoding", "chunked")
-        self.end_headers()
+        headers = [(k, v) for k, v in response.getheaders() if k.lower() not in DROP_HEADERS]
         if not streaming:
-            self.wfile.write(response.read())
+            data = response.read()
+            self.send_response(response.status)
+            for key, value in headers:
+                self.send_header(key, value)
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
             return
+        self.send_response(response.status)
+        for key, value in headers:
+            self.send_header(key, value)
+        self.send_header("transfer-encoding", "chunked")
+        self.end_headers()
         while True:
             chunk = response.read(CHUNK)
             if not chunk:

@@ -40,6 +40,10 @@ DEFAULT_CONFIG = {
     "upstream_api_key": "",
     "default_effort": "max",
     "local_title_synthesis": False,
+    "upstream_connect_timeout": 30,
+    "upstream_read_timeout": 300,
+    "upstream_retries": 2,
+    "upstream_retry_backoff": 0.6,
     "routes": DEFAULT_ROUTES,
 }
 
