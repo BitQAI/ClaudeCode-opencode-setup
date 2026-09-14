@@ -159,6 +159,31 @@ It is **off by default** to stay identical to stock behaviour.
 | `~/Library/LaunchAgents/com.bitqai.ccd-gateway.plist` | LaunchAgent definition |
 | `~/Library/Application Support/Claude-3p/configLibrary/` | Desktop 3P profiles (only this script's own entry is managed) |
 
+### 6.1 Where Desktop's "instructions" actually live
+
+**Settings → General → Instructions for Claude** and a repo-level `CLAUDE.md` are **two different mechanisms**:
+
+| Mechanism | Who reads it | Where it lives |
+|---|---|---|
+| `CLAUDE.md` | Claude Code: CLI, IDE extensions, Desktop's `Code` tab | filesystem (project root, or `~/.claude/CLAUDE.md`) |
+| Instructions for Claude | the Desktop app itself (Chat / Cowork / Code) | `~/Library/Application Support/Claude-3p/local-agent-mode-sessions/<accountUUID>/00000000/cowork_account_settings.json`, field `__account_profile.conversation_preferences` |
+
+Measured on 2026-09-14 (Desktop `1.52386.6`, 3P mode):
+
+- it is a **plain Markdown string inside a JSON field** (not a standalone `.md` file), file mode `600`;
+- the text is **reformatted** on save (tables become `| --- |` aligned, trailing spaces dropped), so a byte-wise
+  comparison with the original differs while the meaning stays the same;
+- it takes effect by being injected into the session **systemPrompt** (visible as `attachment.systemPrompt[0]`
+  in local agent session records);
+- directories are keyed by **account UUID** (here `4a7da5a9-…`), i.e. this is account-level; the `Claude/` (1P)
+  directory has no such file;
+- there is no UI to view the raw file, but the JSON field can be edited directly — fully quit and relaunch Desktop
+  afterwards; signing in again or switching accounts may overwrite it.
+
+> Being account-level (`__` prefix, most likely a local cache of a server-side profile), do not put anything in it
+> that must not leave this machine. To make the **terminal Claude Code** follow the same rules, put them in
+> `~/.claude/CLAUDE.md` — the two are not connected.
+
 ---
 
 ## 7. Troubleshooting
@@ -168,11 +193,15 @@ It is **off by default** to stay identical to stock behaviour.
 | `Gateway` badge missing | `--status` for the profile; fully quit (⌘Q) and reopen; otherwise `--restore` and reinstall |
 | `The provider rejected your credentials` | invalid/expired key: `--key sk-…` (the gateway restarts automatically) |
 | UI spins forever | `tail -f ~/.claude-desktop-opencode/gateway.log`; `upstream unreachable` means network/URL trouble |
+| Desktop shows `Gateway returned an error` (HTTP 502) | if the log shows `SSLEOFError` / `upstream unreachable`, the upstream TLS connection was cut (proxy/TUN node flapping). The gateway retries automatically (`upstream_retries`, default 2); if it keeps happening, pick a steadier proxy node or route `opencode.ai` as DIRECT |
+| A single request takes tens of seconds | make sure the gateway is current: non-stream replies must carry an explicit `content-length` (older builds omitted it and clients waited for the connection to close) |
 | Port already in use | switch with `--port 8899`; the profile is updated to match |
 | Config change not applied | the LaunchAgent is reloaded on change; if not, rerun the installer without arguments |
 | After `--restore` Desktop still points at the old gateway | the backup is a snapshot taken **at install time**; if another tool had already rewritten the `Default` entry, that is what gets restored. Check `~/.claude-desktop-opencode/backup/Claude-3p/configLibrary/`: the stock `Default` profile is `{}` and `claude_desktop_config.json` has no `deploymentMode` |
 
 Logs are always redacted: route id, rewritten model, status code and latency only — never keys, tokens or bodies.
+
+Concurrency note: the upstream queues requests per key (measured: three concurrent requests pushed a single call from ~2.7s to ~8s). Desktop's first probe can fire several at once — that is expected.
 
 ---
 

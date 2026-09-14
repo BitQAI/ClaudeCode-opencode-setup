@@ -13,6 +13,11 @@ This repo ships two parts:
 | root (`setup-claude-opencode.sh`) | terminal `claude` CLI, IDE extensions, Claude Desktop's built-in Claude Code sessions | `~/.claude/settings.json` |
 | [`desktop/`](/desktop) (`setup-desktop-opencode.sh`) | Claude Desktop **Chat / Cowork** (third-party inference via a 3P local gateway) | `Claude-3p` profile + `~/.claude-desktop-opencode/` |
 
+Also included: [`CLAUDE.md`](/CLAUDE.md) — the engineering guidelines used in this repo (Claude Code picks it up
+automatically when working here), kept identical to `~/.claude/CLAUDE.md`.
+Note it only governs **Claude Code**: Desktop's Chat / Cowork never read a filesystem `CLAUDE.md` and instead use
+**Instructions for Claude** in Settings (see [desktop/README.en.md 6.1](/desktop/README.en.md) for where that is stored).
+
 ---
 
 ## 1. Architecture

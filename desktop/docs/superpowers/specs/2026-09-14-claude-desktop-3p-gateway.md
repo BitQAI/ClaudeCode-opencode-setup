@@ -1,6 +1,6 @@
 # Claude Desktop × OpenCode Go 本地网关（3P 模式）— 设计规格
 
-日期：2026-09-14　状态：待用户确认
+日期：2026-09-14　状态：**已实施并验证**（代码并入 `BitQAI/ClaudeCode-opencode-setup` 的 `desktop/`）
 
 ## 1. 问题背景
 
@@ -144,6 +144,8 @@ https://opencode.ai/zen/go/v1/messages（x-api-key 认证）
 3. **假 HOME 污染真实 launchd**：新增 `SKIP_AGENT`，`HOME` 与真实用户目录不一致时跳过 LaunchAgent 并降级为 pidfile。
 4. **`status` 误报未运行**：原先只认 pidfile；现 LaunchAgent 在载入即视为运行中并做 `GET /v1/models` 自检。
 5. **`--restore` 用到旧代码**：还原前会同步仓库最新网关代码。
+6. **非流式响应缺 `Content-Length`（体感"网关极慢"）**：上游以 chunked 分帧，网关把 `transfer-encoding` 当 hop-by-hop 丢弃后既没补长度也没标 chunked，客户端只能等连接关闭——实测同一请求经网关要 48～120 秒，而直连上游 1.6 秒。现在非流式响应读完 body 后显式写 `content-length`，流式统一 chunked，并丢弃上游的 `server`/`date` 避免重复头。修复后同一请求 2.7 秒。
+7. **上游连接抖动直接 502**：本机 Clash Verge（TUN + fake-ip，`opencode.ai` → `198.18.0.77`）下约 1/3 连接在 TLS 阶段被中断（`SSLEOFError: UNEXPECTED_EOF_WHILE_READING`）。网关现在按 `upstream_retries`（默认 2）+ 退避重试，日志记录每次 attempt 的耗时与异常；连接超时与读超时分离（`upstream_connect_timeout` 30s / `upstream_read_timeout` 300s，替代原先一刀切的 600s）。
 
 ### 备份快照的注意事项（排错项）
 

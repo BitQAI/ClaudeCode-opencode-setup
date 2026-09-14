@@ -158,6 +158,26 @@ bash setup-desktop-opencode.sh --local-title on
 | `~/Library/LaunchAgents/com.bitqai.ccd-gateway.plist` | 常驻服务定义 |
 | `~/Library/Application Support/Claude-3p/configLibrary/` | 桌面端 3P profile（本脚本只维护自己那一条） |
 
+### 6.1 桌面端的"准则"存在哪（实测）
+
+桌面端设置里的 **Settings → General → Instructions for Claude** 与仓库里的 `CLAUDE.md` **不是一回事**：
+
+| 机制 | 谁读它 | 存在哪 |
+|---|---|---|
+| `CLAUDE.md` | Claude Code：CLI、IDE 扩展、桌面端 `Code` 标签 | 文件系统（项目根目录，或 `~/.claude/CLAUDE.md`） |
+| Instructions for Claude | 桌面端应用本身（Chat / Cowork / Code 全部会话） | `~/Library/Application Support/Claude-3p/local-agent-mode-sessions/<账号UUID>/00000000/cowork_account_settings.json` 里的 `__account_profile.conversation_preferences` |
+
+实测（2026-09-14，Desktop `1.52386.6`，3P 模式）：
+
+- 它是**一段 Markdown 纯文本**，存在 JSON 字段里（不是独立的 `.md` 文件），文件权限 `600`；
+- 保存时内容会被**格式化**（表格变成 `| --- |` 对齐风格、去掉行尾空格），因此和原文逐字节比对会有差异，语义不变；
+- 生效方式是注入会话的 **systemPrompt**（在本地 agent 会话记录中可见 `attachment.systemPrompt[0]`）；
+- 目录按**账号 UUID** 分（本机为 `4a7da5a9-…`），即账号级偏好；`Claude/`（1P 目录）下没有该文件；
+- 界面没有"查看原始文件"入口，但可以直接编辑该 JSON 字段——改完需完全退出并重启桌面端；重新登录/切换账号可能被覆盖。
+
+> 因为它是账号级偏好（`__` 前缀，倾向"服务端 profile 的本地缓存"），不要把不该离开本机的密钥写进去。
+> 想让**终端 Claude Code** 也遵守同一套准则，请把内容放到 `~/.claude/CLAUDE.md`；两者互不相通。
+
 ---
 
 ## 7. 排错
@@ -167,12 +187,16 @@ bash setup-desktop-opencode.sh --local-title on
 | 桌面端底部没有出现 `Gateway` | `--status` 看 profile 是否为 `gateway`；确认完全退出（⌘Q）后重开；必要时 `--restore` 再重装 |
 | 报 `The provider rejected your credentials` | Key 无效/过期：`--key sk-...` 更新后会自动重启网关 |
 | 界面长时间转圈 | `tail -f ~/.claude-desktop-opencode/gateway.log`；若出现 `upstream unreachable`，检查网络与 `upstream_base_url` |
+| 桌面端报 `Gateway returned an error`（HTTP 502） | 日志里若是 `SSLEOFError` / `upstream unreachable`，说明上游连接在 TLS 阶段被中断（代理/TUN 节点抖动）。网关会按 `upstream_retries`（默认 2）自动重试；仍频繁出现请换更稳的代理节点，或把 `opencode.ai` 设为直连 |
+| 单个请求耗时数十秒 | 确认网关是最新代码：非流式响应必须显式带 `content-length`（旧版会漏掉长度，客户端只能干等连接关闭） |
 | 端口被占用 | `--port 8899` 换端口，脚本会同步更新 profile |
 | 改完配置没生效 | 配置改动会触发 LaunchAgent 重载；若仍不生效，`bash setup-desktop-opencode.sh` 重跑一次 |
 | 还原后想再回来 | 备份在 `~/.claude-desktop-opencode/backup/`，重跑无参安装即可 |
 | `--restore` 后桌面端仍指向旧网关 | 备份是**安装那一刻**的快照。若安装前已被别的工具改过（例如把 `Default` 条目也写成了 gateway 配置），还原得到的就是那个状态。检查 `~/.claude-desktop-opencode/backup/Claude-3p/configLibrary/` 里 `Default` 的 profile：官方默认应为 `{}`，`claude_desktop_config.json` 不含 `deploymentMode` |
 
 日志一律脱敏：只记录路由名、改写后的模型、状态码与耗时，**不记录 Key、Token 与正文**。
+
+并发提示：上游对同一 Key 的并发请求会排队（实测 3 并发时单个请求由 ~2.7s 升到 ~8s），桌面端首次探测可能同时发多个请求，属正常现象。
 
 ---
 

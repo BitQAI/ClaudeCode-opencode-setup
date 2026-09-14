@@ -13,6 +13,9 @@
 | 根目录（`setup-claude-opencode.sh`） | 终端 `claude` CLI、IDE 扩展、桌面端内置的 Claude Code 会话 | `~/.claude/settings.json` |
 | [`desktop/`](/desktop)（`setup-desktop-opencode.sh`） | Claude Desktop 的 **Chat / Cowork**（第三方推理 3P 本地网关） | `Claude-3p` profile + `~/.claude-desktop-opencode/` |
 
+另附 [`CLAUDE.md`](/CLAUDE.md)：本仓库使用的工程准则（Claude Code 在这个目录下会自动读取），与 `~/.claude/CLAUDE.md` 保持同一份内容。
+注意它**只管 Claude Code**：桌面端 Chat / Cowork 不读文件系统里的 `CLAUDE.md`，要用设置里的 **Instructions for Claude**（存储位置与形式见 [desktop/README.md 6.1](/desktop/README.md)）。
+
 ---
 
 ## 一、架构总览
