@@ -254,12 +254,22 @@ do_install() {
 }
 
 install_self() {
-  local src="${BASH_SOURCE[0]:-}"
-  [ -n "$src" ] && [ -f "$src" ] || return 0
+  local src="${BASH_SOURCE[0]:-}" dest
   mkdir -p "$INSTALL_DIR"
-  if [ "$(cd "$(dirname "$src")" && pwd)" != "$(cd "$INSTALL_DIR" && pwd)" ]; then
-    cp "$src" "$INSTALL_DIR/$SCRIPT_NAME"
-    chmod +x "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null || true
+  dest="$INSTALL_DIR/$SCRIPT_NAME"
+  if [ -n "$src" ] && [ -f "$src" ] && [ -s "$src" ]; then
+    if [ "$(cd "$(dirname "$src")" && pwd)" = "$(cd "$INSTALL_DIR" && pwd)" ]; then
+      return 0
+    fi
+    cp "$src" "$dest" && chmod +x "$dest" 2>/dev/null
+    return 0
+  fi
+  # 通过 `bash <(curl ...)` / 管道运行时，本地没有可复制的脚本文件，从 GitHub 取一份
+  if curl -fsSL "$REPO_RAW/$SCRIPT_NAME" -o "$dest" 2>/dev/null; then
+    chmod +x "$dest" 2>/dev/null || true
+    info "已从 GitHub 自安装到 $dest"
+  else
+    warn "无法自安装脚本到 $INSTALL_DIR（不影响本次配置，可稍后手动复制）"
   fi
 }
 
@@ -388,7 +398,10 @@ install_self_from() {
 
 # ---------- 入口 ----------
 main() {
-  SCRIPT_NAME="$(basename "${BASH_SOURCE[0]:-setup-claude-opencode.sh}")"
+  SCRIPT_NAME="setup-claude-opencode.sh"
+  if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+  fi
   detect_platform
   detect_python
   resolve_paths
