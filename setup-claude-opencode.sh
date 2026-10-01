@@ -408,21 +408,31 @@ PY
 }
 
 do_update() {
-  local script_dir="${BASH_SOURCE[0]:-}"
+  local script_dir="${BASH_SOURCE[0]:-}" refreshed="no"
   script_dir="$(cd "$(dirname "$script_dir")" && pwd)"
   if [ -d "$script_dir/.git" ]; then
     info "检测到 git 仓库，正在拉取最新脚本..."
     git -C "$script_dir" pull --ff-only || warn "git pull 失败，改用下载方式"
+    refreshed="yes"
   fi
   if [ ! -d "$script_dir/.git" ] || [ -n "${FORCE_DOWNLOAD:-}" ]; then
     local tmp
     tmp="$(mktemp 2>/dev/null || echo "/tmp/$SCRIPT_NAME.$$")"
     info "从 GitHub 下载最新脚本..."
-    curl -fsSL "$REPO_RAW/$SCRIPT_NAME" -o "$tmp" || die "下载失败：$REPO_RAW/$SCRIPT_NAME"
+    # 带时间戳绕过 raw.githubusercontent.com 的 CDN 缓存（max-age=300），
+    # 否则刚推送的版本仍会拉到旧脚本
+    curl -fsSL "$REPO_RAW/$SCRIPT_NAME?v=$(date +%s)" -o "$tmp" || die "下载失败：$REPO_RAW/$SCRIPT_NAME"
     install_self_from "$tmp"
+    rm -f "$tmp" 2>/dev/null || true
     info "已更新 $INSTALL_DIR/$SCRIPT_NAME"
+    refreshed="yes"
   fi
-  info "重新执行安装流程..."
+  if [ "$refreshed" = "yes" ]; then
+    # 本脚本刚被改写，当前 shell 仍按旧字节偏移继续读取会错位报错，
+    # 必须换新进程执行安装流程
+    info "用新版本脚本重新执行安装流程..."
+    exec "$INSTALL_DIR/$SCRIPT_NAME" --install
+  fi
   do_install
 }
 
