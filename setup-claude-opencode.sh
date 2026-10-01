@@ -416,12 +416,19 @@ do_update() {
     refreshed="yes"
   fi
   if [ ! -d "$script_dir/.git" ] || [ -n "${FORCE_DOWNLOAD:-}" ]; then
-    local tmp
+    local tmp url sha
+    # raw.githubusercontent.com 的 CDN 缓存（max-age=300）忽略查询参数，
+    # 只有按 commit SHA 引用才能立即拿到最新版本；ls-remote 走 git 协议不受影响
+    sha="$(git ls-remote "https://github.com/${REPO_SLUG}.git" HEAD 2>/dev/null | awk 'NR==1{print $1}')"
+    if [ -n "$sha" ]; then
+      url="https://raw.githubusercontent.com/${REPO_SLUG}/${sha}/${SCRIPT_NAME}"
+    else
+      url="$REPO_RAW/$SCRIPT_NAME"
+      warn "无法解析远端 commit（缺少 git？），改用分支地址，可能命中 CDN 缓存"
+    fi
     tmp="$(mktemp 2>/dev/null || echo "/tmp/$SCRIPT_NAME.$$")"
-    info "从 GitHub 下载最新脚本..."
-    # 带时间戳绕过 raw.githubusercontent.com 的 CDN 缓存（max-age=300），
-    # 否则刚推送的版本仍会拉到旧脚本
-    curl -fsSL "$REPO_RAW/$SCRIPT_NAME?v=$(date +%s)" -o "$tmp" || die "下载失败：$REPO_RAW/$SCRIPT_NAME"
+    info "从 GitHub 下载最新脚本（${sha:-main}）..."
+    curl -fsSL "$url" -o "$tmp" || die "下载失败：$url"
     install_self_from "$tmp"
     rm -f "$tmp" 2>/dev/null || true
     info "已更新 $INSTALL_DIR/$SCRIPT_NAME"
