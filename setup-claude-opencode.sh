@@ -236,7 +236,7 @@ backup_once() {
 # 只保留"首次安装前"那一份备份，重复运行不会覆盖它，保证 --restore 能回到最初状态
 ensure_backup() {
   if [ -f "$MANIFEST_FILE" ]; then
-    info "已存在安装前备份（$BACKUP_DIR），保留不覆盖"
+    info "已存在安装前备份（${BACKUP_DIR}），保留不覆盖"
     return 0
   fi
   backup_once
@@ -248,7 +248,7 @@ do_install() {
   load_key
   [ -n "$API_KEY" ] || ask_key
 
-  info "正在校验 API Key（$BASE_URL）..."
+  info "正在校验 API Key（${BASE_URL}）..."
   verify_endpoint "$API_KEY" "$MODEL_MAIN" && ok "API Key 校验通过" || warn "校验未通过，仍会写入配置，可稍后用 --key 重试"
 
   save_key "$API_KEY"
@@ -283,7 +283,7 @@ install_self() {
     chmod +x "$dest" 2>/dev/null || true
     info "已从 GitHub 自安装到 $dest"
   else
-    warn "无法自安装脚本到 $INSTALL_DIR（不影响本次配置，可稍后手动复制）"
+    warn "无法自安装脚本到 ${INSTALL_DIR}（不影响本次配置，可稍后手动复制）"
   fi
 }
 
@@ -330,7 +330,7 @@ PY
     warn "settings.json 不存在"
   fi
   if [ -n "$API_KEY" ]; then
-    info "Key 文件：$ENV_FILE（$(mask_key "$API_KEY")）"
+    info "Key 文件：${ENV_FILE}（$(mask_key "$API_KEY")）"
     info "连通性检查中..."
     verify_endpoint "$API_KEY" "$MODEL_MAIN" && ok "$MODEL_MAIN 调用正常" || warn "调用失败"
   else
@@ -349,18 +349,18 @@ do_effort() {
   fi
   case "$EFFORT" in
     low|medium|high|xhigh|max) ;;
-    *) die "无效的推理强度：$EFFORT（可选 low|medium|high|xhigh|max）" ;;
+    *) die "无效的推理强度：${EFFORT}（可选 low|medium|high|xhigh|max）" ;;
   esac
   load_key
   [ -n "$API_KEY" ] || die "尚未配置 API Key，请先运行 --key。"
   ensure_backup
   save_key "$API_KEY"
   apply_settings
-  ok "已设置推理强度：$EFFORT（重启 Claude Code 生效）"
+  ok "已设置推理强度：${EFFORT}（重启 Claude Code 生效）"
 }
 
 do_restore() {
-  [ -f "$MANIFEST_FILE" ] || die "找不到备份清单 $MANIFEST_FILE，无需还原。"
+  [ -f "$MANIFEST_FILE" ] || die "找不到备份清单 ${MANIFEST_FILE}，无需还原。"
   # shellcheck disable=SC1090
   . "$MANIFEST_FILE"
   load_key
@@ -380,7 +380,7 @@ do_restore() {
   fi
   rm -f "$ENV_FILE"
   ok "已删除本脚本保存的 API Key"
-  info "备份仍保留在 $BACKUP_DIR（如需彻底清理可手动删除）"
+  info "备份仍保留在 ${BACKUP_DIR}（如需彻底清理可手动删除）"
   info "请【重启 Claude Code】使还原生效。"
 }
 
