@@ -16,14 +16,14 @@
 #
 set -euo pipefail
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"
 REPO_SLUG="BitQAI/ClaudeCode-opencode-setup"
 REPO_RAW="https://raw.githubusercontent.com/${REPO_SLUG}/main"
 
 # ---------- 可调参数 ----------
 BASE_URL_DEFAULT="https://opencode.ai/zen/go"
 MODEL_MAIN_DEFAULT="deepseek-v4.1-flash"
-MODEL_OPUS_DEFAULT="deepseek-v4-pro"
+MODEL_OPUS_DEFAULT="space-bunny-free"
 MODEL_SONNET_DEFAULT="deepseek-v4.1-flash"
 MODEL_HAIKU_DEFAULT="deepseek-v4-flash"
 # 默认档（Sonnet）= deepseek-v4.1-flash，推理强度拉满

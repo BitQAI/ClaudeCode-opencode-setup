@@ -29,7 +29,7 @@ Claude Code (CLI / desktop)
   ▼
 https://opencode.ai/zen/go/v1/messages   (OpenCode Go, Anthropic-compatible endpoint)
   ├── deepseek-v4.1-flash   main model (native text + image)
-  ├── deepseek-v4-pro       Opus slot
+  ├── space-bunny-free     Opus slot
   ├── deepseek-v4-flash     Haiku slot (fast / cheap background work)
   └── glm-5.2 / kimi-k3 / qwen3.8-max / minimax-m3 … (other Go models)
 ```
@@ -77,7 +77,7 @@ Resulting `~/.claude/settings.json`:
     "ANTHROPIC_BASE_URL": "https://opencode.ai/zen/go",
     "ANTHROPIC_API_KEY": "sk-your-opencode-go-key",
     "ANTHROPIC_MODEL": "deepseek-v4.1-flash",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "space-bunny-free",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4.1-flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
     "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash",
@@ -93,7 +93,7 @@ Restart Claude Code (open a new terminal) and run `claude` in any project.
 | Claude Code slot | Actual model | Notes |
 |---|---|---|
 | **Default / Sonnet** | `deepseek-v4.1-flash` | primary slot, **effort = max**, native multimodal (text + image) |
-| Opus (`/model opus`) | `deepseek-v4-pro` | stronger reasoning slot |
+| Opus (`/model opus`) | `space-bunny-free` | free tier on the Go plan |
 | Haiku | `deepseek-v4-flash` | background work (titles, probes, summaries), fast and cheap |
 | Subagents | `deepseek-v4.1-flash` | via `CLAUDE_CODE_SUBAGENT_MODEL` |
 
@@ -139,7 +139,7 @@ data.setdefault("env", {}).update({
     "ANTHROPIC_BASE_URL": "https://opencode.ai/zen/go",
     "ANTHROPIC_API_KEY": "sk-your-opencode-go-key",
     "ANTHROPIC_MODEL": "deepseek-v4.1-flash",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "space-bunny-free",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4.1-flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
     "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash",
@@ -208,7 +208,7 @@ claude -p "Use the Bash tool to run exactly: echo TOOL_OK" --allowedTools Bash -
 | Bash tool call | 2 turns, `result:"OPENCODE_TOOL_OK"` |
 | Haiku slot mapping | auxiliary calls hit `deepseek-v4-flash` |
 | Image input | red 64×64 PNG → `"Red"` |
-| Model availability | `deepseek-v4.1-flash` / `deepseek-v4-flash` / `deepseek-v4-pro` all `200` |
+| Model availability | `deepseek-v4.1-flash` / `deepseek-v4-flash` / `space-bunny-free` all `200` |
 | Default slot = Sonnet | session default `model: sonnet` → actual request model `deepseek-v4.1-flash` |
 | Effort max | `CLAUDE_CODE_EFFORT_LEVEL=max` → request carries `output_config.effort="max"` + `thinking: adaptive`, `200` with no warning |
 | settings beats process env | junk `ANTHROPIC_BASE_URL`/`API_KEY` + valid settings → still routed to opencode (`is_error:false`) |

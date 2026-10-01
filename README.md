@@ -27,7 +27,7 @@ Claude Code (CLI / 桌面)
   ▼
 https://opencode.ai/zen/go/v1/messages   (OpenCode Go 订阅，Anthropic 兼容端点)
   ├── deepseek-v4.1-flash   主模型（原生多模态：文本 + 图片）
-  ├── deepseek-v4-pro       Opus 档
+  ├── space-bunny-free     Opus 档
   ├── deepseek-v4-flash     Haiku 档（快、便宜，背景小任务）
   └── glm-5.2 / kimi-k3 / qwen3.8-max / minimax-m3 …（Go 订阅内其它模型）
 ```
@@ -78,7 +78,7 @@ cd ClaudeCode-opencode-setup && bash setup-claude-opencode.sh
     "ANTHROPIC_BASE_URL": "https://opencode.ai/zen/go",
     "ANTHROPIC_API_KEY": "sk-你的opencode-go-key",
     "ANTHROPIC_MODEL": "deepseek-v4.1-flash",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "space-bunny-free",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4.1-flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
     "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash",
@@ -94,7 +94,7 @@ cd ClaudeCode-opencode-setup && bash setup-claude-opencode.sh
 | Claude Code 档位 | 实际模型 | 说明 |
 |---|---|---|
 | **默认 / Sonnet** | `deepseek-v4.1-flash` | 主力档，**推理强度 max**，原生多模态（文本 + 图片） |
-| Opus（`/model opus`） | `deepseek-v4-pro` | 更强推理档 |
+| Opus（`/model opus`） | `space-bunny-free` | Go 订阅免费档 |
 | Haiku | `deepseek-v4-flash` | 背景小任务（标题生成、探测、摘要），快且便宜 |
 | 子代理 | `deepseek-v4.1-flash` | 由 `CLAUDE_CODE_SUBAGENT_MODEL` 控制 |
 
@@ -171,7 +171,7 @@ data.setdefault("env", {}).update({
     "ANTHROPIC_BASE_URL": "https://opencode.ai/zen/go",
     "ANTHROPIC_API_KEY": "sk-你的opencode-go-key",
     "ANTHROPIC_MODEL": "deepseek-v4.1-flash",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "space-bunny-free",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4.1-flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
     "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash",
@@ -265,7 +265,7 @@ claude -p "Use the Bash tool to run exactly: echo TOOL_OK" --allowedTools Bash -
 | 工具调用 | `claude -p "... echo OPENCODE_TOOL_OK" --allowedTools Bash` | 2 turns，`result:"OPENCODE_TOOL_OK"` |
 | Haiku 档映射 | 同一次会话的辅助请求 | 命中 `deepseek-v4-flash`（`modelUsage` 可见） |
 | 图片理解 | image block → `deepseek-v4.1-flash` | `"Red"` |
-| 模型可用性 | `deepseek-v4.1-flash` / `deepseek-v4-flash` / `deepseek-v4-pro` | 均 `200` |
+| 模型可用性 | `deepseek-v4.1-flash` / `deepseek-v4-flash` / `space-bunny-free` | 均 `200` |
 | 默认档 = Sonnet 映射 | 会话默认 `model: sonnet` | 实际请求模型 `deepseek-v4.1-flash` |
 | 推理强度 max | `CLAUDE_CODE_EFFORT_LEVEL=max` | 请求体含 `output_config.effort="max"` + `thinking: adaptive`，`200` 返回 `PONG`（无告警） |
 | settings 覆盖进程环境 | 垃圾 `ANTHROPIC_BASE_URL`/`API_KEY` + 正常 settings | 仍走 opencode 成功（`is_error:false`） |
