@@ -50,15 +50,57 @@ Requirements:
 2. An **OpenCode Go** API key (`sk-…`, from https://opencode.ai/zen).
 3. **Python 3.8+** (used to merge JSON safely).
 
+### macOS / Linux
+
 ```bash
 # One-liner from GitHub
 bash <(curl -fsSL https://raw.githubusercontent.com/BitQAI/ClaudeCode-opencode-setup/main/setup-claude-opencode.sh)
 
 # Or from a local clone
+git clone https://github.com/BitQAI/ClaudeCode-opencode-setup.git
 cd ClaudeCode-opencode-setup && bash setup-claude-opencode.sh
 ```
 
 First run asks for the API key. Re-running backs up the current config again and re-applies.
+
+### Windows (Git Bash)
+
+Windows uses the same bash script — it **must be run from Git Bash**; PowerShell / CMD cannot parse the syntax below.
+
+Extra prerequisites (on top of items 1-3 above):
+
+- **Git for Windows** (ships Git Bash and `curl`)
+- `python --version` prints 3.8+ inside Git Bash (the script probes `python3` then `python`, skipping the Microsoft Store placeholder)
+
+```bash
+# 1) Open Git Bash: search "Git Bash" in the Start menu, or type bash in an Explorer address bar
+# 2) Paste and run inside Git Bash (identical to the macOS command)
+bash <(curl -fsSL https://raw.githubusercontent.com/BitQAI/ClaudeCode-opencode-setup/main/setup-claude-opencode.sh)
+```
+
+In Git Bash, `~` is the Windows user profile, so paths map one to one:
+
+| Git Bash | Windows |
+|---|---|
+| `~/.claude/settings.json` | `%USERPROFILE%\.claude\settings.json` |
+| `~/.claude/claude-opencode-setup/setup-claude-opencode.sh` | `%USERPROFILE%\.claude\claude-opencode-setup\setup-claude-opencode.sh` |
+| `~/.claude/backup-claude-opencode/` | `%USERPROFILE%\.claude\backup-claude-opencode\` |
+
+Verify the result from PowerShell:
+
+```powershell
+Get-Content $env:USERPROFILE\.claude\settings.json
+```
+
+Later maintenance commands still run in Git Bash:
+
+```bash
+bash ~/.claude/claude-opencode-setup/setup-claude-opencode.sh --status
+```
+
+> Do not run this script inside WSL: WSL's `~` lives in the Linux filesystem and the Windows Claude Code build cannot read it. Only relevant if you explicitly point `CLAUDE_CONFIG_DIR` at a directory both sides can reach.
+
+> The commands in this section were **not verified on a real Windows machine** (the author only has macOS); the script does handle Windows paths and the `python` command name. No PowerShell installer is shipped — see section 9.
 
 What the script does:
 
@@ -240,7 +282,7 @@ claude -p "Use the Bash tool to run exactly: echo TOOL_OK" --allowedTools Bash -
 
 ## 9. Scope and limitations
 
-- Only the bash installer is shipped (works on macOS, Linux and Windows Git Bash — it handles Windows paths and the `python` command name). A PowerShell version is intentionally omitted: there is no Windows/PowerShell environment available to verify it, and unverified code is not shipped here.
+- Only the bash installer is shipped: run it directly on macOS / Linux, or through **Git Bash** on Windows (the script handles Windows paths and the `python` command name — see section 2). A PowerShell version is intentionally omitted: there is no Windows/PowerShell environment available to verify it, and unverified code is not shipped here.
 - Default mapping targets the DeepSeek models inside OpenCode Go. Switch to `glm-5.2`, `kimi-k3`, etc. by editing the model names in `settings.json` (`curl $BASE_URL/v1/models` lists everything available).
 
 ---

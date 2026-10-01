@@ -49,17 +49,57 @@ https://opencode.ai/zen/go/v1/messages   (OpenCode Go 订阅，Anthropic 兼容�
 2. 有 **OpenCode Go 订阅**的 API Key（`sk-` 开头，在 https://opencode.ai/zen 获取）
 3. 本机有 **Python 3.8+**（脚本用它安全地合并 JSON）
 
-### macOS / Linux / Windows(Git Bash)
+### macOS / Linux
 
 ```bash
 # 方式一：curl 一键安装（从 GitHub）
 bash <(curl -fsSL https://raw.githubusercontent.com/BitQAI/ClaudeCode-opencode-setup/main/setup-claude-opencode.sh)
 
 # 方式二：本地脚本
+git clone https://github.com/BitQAI/ClaudeCode-opencode-setup.git
 cd ClaudeCode-opencode-setup && bash setup-claude-opencode.sh
 ```
 
 首次运行会要求输入 API Key；已安装过再次运行会重新备份并覆盖配置。
+
+### Windows（Git Bash）
+
+Windows 用的仍是同一个 bash 脚本，**必须在 Git Bash 里执行**；PowerShell / CMD 解析不了下面的语法。
+
+额外前提（除上面 1–3 条外）：
+
+- **Git for Windows**（自带 Git Bash 与 `curl`）
+- 在 Git Bash 里执行 `python --version` 能输出 3.8+ 版本号（脚本会自动找 `python3` 或 `python`，并跳过 Windows 应用商店的占位符）
+
+```bash
+# 1) 打开 Git Bash：开始菜单搜 "Git Bash"，或在资源管理器地址栏输入 bash 回车
+# 2) 在 Git Bash 里粘贴执行（命令与 macOS 完全相同）
+bash <(curl -fsSL https://raw.githubusercontent.com/BitQAI/ClaudeCode-opencode-setup/main/setup-claude-opencode.sh)
+```
+
+装完后 Git Bash 的 `~` 就是 Windows 用户目录，路径一一对应：
+
+| Git Bash | Windows |
+|---|---|
+| `~/.claude/settings.json` | `%USERPROFILE%\.claude\settings.json` |
+| `~/.claude/claude-opencode-setup/setup-claude-opencode.sh` | `%USERPROFILE%\.claude\claude-opencode-setup\setup-claude-opencode.sh` |
+| `~/.claude/backup-claude-opencode/` | `%USERPROFILE%\.claude\backup-claude-opencode\` |
+
+所以配置写好后，可以直接用 PowerShell 复核：
+
+```powershell
+Get-Content $env:USERPROFILE\.claude\settings.json
+```
+
+后续运维命令仍然在 Git Bash 里跑：
+
+```bash
+bash ~/.claude/claude-opencode-setup/setup-claude-opencode.sh --status
+```
+
+> 不要在 WSL 里跑本脚本：WSL 的 `~` 在 Linux 文件系统里，Windows 版 Claude Code 读不到。除非你显式设置 `CLAUDE_CONFIG_DIR` 指向双方都能访问的目录。
+
+> 本节命令未在真机 Windows 环境验证（作者只有 macOS）；脚本内已做 Windows 路径与 `python` 命令适配。PowerShell 版安装器未提供，理由见第十节。
 
 ### 脚本做了什么
 
@@ -210,7 +250,7 @@ claude -p "Reply with exactly: PONG"
 
 ## 五、常用命令
 
-脚本安装后会固定在 `~/.claude/claude-opencode-setup/setup-claude-opencode.sh`：
+脚本安装后会固定在 `~/.claude/claude-opencode-setup/setup-claude-opencode.sh`（Windows 上即 `%USERPROFILE%\.claude\claude-opencode-setup\setup-claude-opencode.sh`，且要在 Git Bash 里执行）：
 
 ```bash
 # 查看/修改 API Key（交互式，显示脱敏后的当前 Key）
@@ -312,7 +352,7 @@ claude -p "Use the Bash tool to run exactly: echo TOOL_OK" --allowedTools Bash -
 
 ## 十、范围与已知限制
 
-- 目前**只提供 bash 版脚本**（macOS / Linux / Windows Git Bash 均可用，脚本内已做 Windows 路径与 `python` 命令适配）。PowerShell 版尚未提供：本机没有 Windows/PowerShell 环境，无法验证，按"没验证不发"的原则暂不附上。
+- 目前**只提供 bash 版脚本**：macOS / Linux 直接运行，Windows 走 **Git Bash**（脚本内已做 Windows 路径与 `python` 命令适配，详见第二节）。**PowerShell 版未提供**：没有 Windows / PowerShell 环境可验证，按"没验证不发"的原则暂不附上。
 - 默认模型映射针对 OpenCode Go 订阅中的 DeepSeek 系列；若要用 `glm-5.2`、`kimi-k3` 等，直接改 `settings.json` 里对应的模型名即可（`/models` 或 `curl $BASE_URL/v1/models` 可列出全部可用模型）。
 - 端点与模型清单由 OpenCode 控制，可能变动；`deepseek-v4.1-flash` 为当前默认。
 
