@@ -139,6 +139,8 @@ def status(config_path: str | None = None) -> int:
     print(f"上游：{config['upstream_base_url']}")
     print(f"Key ：{'已配置' if config['upstream_api_key'] else '未配置'}")
     print(f"标题本地应答：{'开' if config['local_title_synthesis'] else '关'}")
+    print(f"Token 本地估算：{'开' if config['local_count_tokens'] else '关'}")
+    print(f"上下文窗口：{config['context_window_tokens']}")
     for route in config["routes"]:
         print(f"  route {route['name']:<22} -> {route['model']} (effort={route['effort']})")
     if not running:

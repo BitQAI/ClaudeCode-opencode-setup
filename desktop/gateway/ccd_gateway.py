@@ -18,6 +18,7 @@ import urllib.parse
 
 import ccd_config
 import ccd_lifecycle
+import ccd_routes
 import ccd_upstream
 
 HOP_BY_HOP = {
@@ -28,8 +29,6 @@ HOP_BY_HOP = {
 # 否则非流式响应会出现"既无长度也无 chunked"的歧义，客户端只能干等连接关闭。
 DROP_HEADERS = HOP_BY_HOP | {"content-length", "server", "date"}
 CHUNK = 2048
-# 上游错误体只记这么多字符（也只读这么多）：足够看清楚原因，不堆日志
-ERROR_BODY_LIMIT = 600
 
 
 def append_log(message: str) -> None:
@@ -42,18 +41,36 @@ def append_log(message: str) -> None:
 class Gateway(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     config: dict = {}
+    table: ccd_routes.RouteTable | None = None
 
     def log_message(self, fmt, *args):
         return
 
     # ---- helpers -------------------------------------------------------
-    def route_for(self, requested: str) -> dict:
-        routes = ccd_config.routes_by_name(self.config)
-        route = routes.get(requested)
-        if route is None:
-            route = self.config["routes"][0]
-            append_log(f"WARN unknown route {requested!r} -> fallback {route['name']}")
-        return route
+    def routes(self) -> list[dict]:
+        """当前可用的路由表（必要时重扫）。"""
+        if self.table is None:
+            self.table = ccd_routes.build_table(self.config)
+        if not (self.config.get("free_scan") or {}).get("enabled", True):
+            return self.config["routes"]
+        return self.table.ensure_fresh()
+
+    def route_for(self, requested: str) -> dict | None:
+        """按请求里的模型名找路由。
+
+        Desktop 会把 `claude-opus-4-5` 发成 `claude-opus-4-5-20251101`，
+        所以除了精确匹配，还要用规范化后的名字再匹配一次；匹配不上就报未知模型，
+        不能悄悄回退到第一条路由（那会用错模型）。
+        """
+        rows = self.routes()
+        for route in rows:
+            if route["name"] == requested:
+                return route
+        target = ccd_routes.canonical(requested)
+        for route in rows:
+            if ccd_routes.canonical(route["name"]) == target:
+                return route
+        return None
 
     def send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode()
@@ -79,14 +96,37 @@ class Gateway(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path.rstrip("/").endswith("/v1/models"):
-            data = [{"type": "model", "id": r["name"], "display_name": r["label"],
-                     "created_at": "2026-01-01T00:00:00Z"}
-                    for r in ccd_config.expanded_routes(self.config)]
-            append_log(f"GET /v1/models -> {len(data)} routes")
+            data = self.models_payload()
+            append_log("GET /v1/models -> " + (", ".join(r["id"] for r in data) or "(empty)"))
             self.send_json(200, {"data": data, "has_more": False,
-                                 "first_id": data[0]["id"], "last_id": data[-1]["id"]})
+                                 "first_id": data[0]["id"] if data else None,
+                                 "last_id": data[-1]["id"] if data else None})
             return
         self.send_error_json(404, "not_found_error", path)
+
+    def models_payload(self) -> list[dict]:
+        """Anthropic 风格的 /v1/models 数据，Desktop discovery 直接消费它。
+
+        字段和 app.asar 里 Oen() 的解析一致：
+        - id：路由名，必须能通过 Desktop 的 Mo() 校验；
+        - display_name：picker 显示的标签（除非撞上发布目录的规范名）；
+        - supports_1m / max_input_tokens：让 Desktop 生成 1M 变体；
+        - description：picker 里显示的说明。
+        """
+        payload = []
+        for route in self.routes():
+            entry = {
+                "type": "model",
+                "id": route["name"],
+                "display_name": route.get("label") or route["name"],
+                "description": f"{route['model']} · OpenCode Go",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+            if route.get("supports1m"):
+                entry["supports_1m"] = True
+                entry["max_input_tokens"] = int(self.config.get("context_window_tokens", 1000000))
+            payload.append(entry)
+        return payload
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
@@ -96,15 +136,44 @@ class Gateway(http.server.BaseHTTPRequestHandler):
         payload = self.read_payload()
         if payload is None:
             return
+        if self.config["local_count_tokens"] and path.rstrip("/").endswith("/count_tokens"):
+            self.send_count_tokens(payload)
+            return
         requested = str(payload.get("model") or "")
         route = self.route_for(requested)
+        if route is None:
+            append_log(f"WARN unknown route {requested!r}")
+            self.send_error_json(400, "invalid_request_error",
+                                 f"unknown model {requested!r}")
+            return
         payload = ccd_upstream.rewrite(payload, route)
+        restored = ccd_upstream.ensure_server_tools(payload)
+        if restored:
+            append_log(f"FIX 补回 tools 定义 {restored}（{requested} -> {route['model']}）")
         if self.config["local_title_synthesis"] and ccd_upstream.is_title_request(payload):
             self.send_local_title(route, payload)
             return
         self.forward(path, route, requested, payload)
 
+    # ---- count_tokens（本地估算，上游不提供） ---------------------------
+    def send_count_tokens(self, payload: dict) -> None:
+        tokens = ccd_upstream.estimate_input_tokens(payload)
+        append_log(f"POST /v1/messages/count_tokens {payload.get('model')!r} -> "
+                   f"local estimate {tokens} tokens")
+        self.send_json(200, {"input_tokens": tokens})
+
     # ---- upstream ------------------------------------------------------
+    def send_upstream(self, path: str, body: bytes, headers: dict):
+        conn, target = ccd_upstream.open_upstream(
+            self.config, path, self.config["upstream_connect_timeout"])
+        try:
+            conn.request("POST", target, body=body, headers=headers)
+            ccd_upstream.set_read_timeout(conn, self.config["upstream_read_timeout"])
+            return conn, conn.getresponse()
+        except OSError:
+            conn.close()
+            raise
+
     def forward(self, path: str, route: dict, requested: str, payload: dict) -> None:
         started = time.time()
         session = ccd_upstream.session_id(self.headers, payload)
@@ -117,17 +186,10 @@ class Gateway(http.server.BaseHTTPRequestHandler):
         for attempt in range(1, attempts + 1):
             attempt_started = time.time()
             try:
-                conn, target = ccd_upstream.open_upstream(
-                    self.config, path, self.config["upstream_connect_timeout"])
-                conn.request("POST", target, body=body, headers=headers)
-                ccd_upstream.set_read_timeout(conn, self.config["upstream_read_timeout"])
-                response = conn.getresponse()
+                conn, response = self.send_upstream(path, body, headers)
                 break
             except OSError as exc:
                 last_error = exc
-                if conn is not None:
-                    conn.close()
-                    conn = None
                 elapsed = int((time.time() - attempt_started) * 1000)
                 append_log(f"WARN upstream attempt {attempt}/{attempts} failed after {elapsed}ms: "
                            f"{type(exc).__name__}: {exc}")
@@ -137,12 +199,44 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             append_log(f"ERROR upstream unreachable after {attempts} attempt(s): {last_error}")
             self.send_error_json(502, "api_error", f"upstream unreachable: {last_error}")
             return
-        try:
-            if response.status >= 400:
-                self.respond_upstream_error(response, payload, path, route, requested, started)
+        # 上游不接受显式关闭 thinking，带 thinking={"type":"disabled"} 的请求必然 400。
+        # 客户端无法自行规避，只在确实被拒后去掉 thinking 重试一次，不影响本来能通过的请求。
+        if response.status == 400 and ccd_upstream.thinking_disabled(payload):
+            response.close()
+            conn.close()
+            retried = {k: v for k, v in payload.items() if k != "thinking"}
+            body = json.dumps(retried, ensure_ascii=False).encode()
+            append_log(f"FIX thinking=disabled 被上游拒绝，去掉 thinking 重试 "
+                       f"({requested} -> {route['model']})")
+            try:
+                conn, response = self.send_upstream(path, body, headers)
+            except OSError as exc:
+                append_log(f"ERROR upstream retry failed: {type(exc).__name__}: {exc}")
+                self.send_error_json(502, "api_error", f"upstream unreachable: {exc}")
                 return
+        try:
             streaming = "text/event-stream" in (response.getheader("content-type") or "")
-            self.relay(response, streaming)
+            if response.status >= 400 and not streaming:
+                # 错误响应体是排查上游拒绝原因的唯一线索，原样记一小段再透传回客户端
+                raw = response.read()
+                translated = ccd_upstream.prompt_too_long_error(
+                    response.status, raw, payload, self.config)
+                append_log(f"ERROR upstream {response.status} {requested} -> {route['model']} "
+                           f"({len(body)}B req): {raw[:600].decode('utf-8', 'replace')}")
+                if translated is not None:
+                    append_log(f"FIX 上游 400 无可读原因，按上下文超限改写 "
+                               f"({requested} -> {route['model']}, {len(body)}B req)")
+                if self.config.get("debug_log_request_body"):
+                    # 仅排查用：会把会话正文写进日志，用完请关掉
+                    append_log(f"DEBUG req {requested}: {body[:4000].decode('utf-8', 'replace')}")
+                self.send_response(response.status)
+                self.send_header("content-type", "application/json" if translated is not None
+                                 else (response.getheader("content-type") or "application/json"))
+                self.send_header("content-length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw if translated is None else translated)
+            else:
+                self.relay(response, streaming)
             elapsed = int((time.time() - started) * 1000)
             append_log(f"POST {path} {requested} -> {route['model']} "
                        f"effort={route['effort']} status={response.status} {elapsed}ms")
@@ -175,29 +269,6 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b"%x\r\n" % len(chunk) + chunk + b"\r\n")
         self.wfile.write(b"0\r\n\r\n")
 
-    # ---- upstream 4xx/5xx --------------------------------------------
-    def respond_upstream_error(self, response, payload: dict, path: str,
-                               route: dict, requested: str, started: float) -> None:
-        raw = (response.read(ERROR_BODY_LIMIT) or b"").decode("utf-8", "replace")
-        raw = " ".join(raw.split())[:ERROR_BODY_LIMIT]
-        elapsed = int((time.time() - started) * 1000)
-        append_log(f"POST {path} {requested} -> {route['model']} "
-                   f"effort={route['effort']} status={response.status} {elapsed}ms "
-                   f"upstream_body={json.dumps(raw, ensure_ascii=False)}")
-        limit = int(self.config.get("upstream_context_limit") or 1_000_000)
-        estimated = ccd_upstream.estimate_tokens(payload)
-        # 上游对上下文超限只回空壳 JSON，客户端认不出 prompt_too_long 就不会做反应式压缩，
-        # 界面上只剩 “Invalid request / The request couldn't be completed.”。
-        if (response.status in (400, 413) and ccd_upstream.is_opaque_error_body(raw)
-                and estimated > limit * 0.95):
-            append_log(f"rewrite upstream {response.status} -> prompt_too_long "
-                       f"(estimated {estimated} tokens, limit {limit})")
-            self.send_error_json(400, "invalid_request_error",
-                                 f"prompt is too long: {estimated} tokens > {limit} maximum")
-            return
-        detail = raw[:300] or "empty body"
-        self.send_error_json(response.status, "api_error", f"upstream {response.status}: {detail}")
-
     # ---- optional local title -----------------------------------------
     def send_local_title(self, route: dict, payload: dict) -> None:
         title = ccd_upstream.derive_title(payload)
@@ -217,6 +288,7 @@ class Gateway(http.server.BaseHTTPRequestHandler):
 
 def serve(config: dict) -> None:
     Gateway.config = config
+    Gateway.table = ccd_routes.build_table(config)
     server = http.server.ThreadingHTTPServer((config["listen"], config["port"]), Gateway)
     append_log(f"gateway listening on {config['listen']}:{config['port']} "
                f"upstream={config['upstream_base_url']} routes={len(config['routes'])} "

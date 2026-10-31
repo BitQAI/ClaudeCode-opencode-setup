@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import sys
+import time
 
 STATE_DIRNAME = ".claude-desktop-opencode"
 CONFIG_NAME = "config.json"
@@ -14,23 +16,57 @@ LOG_NAME = "gateway.log"
 
 DEFAULT_ROUTES = [
     {
+        # 固定用 claude-sonnet-4-5 做默认模型：Desktop 会记住用户选中的
+        # 模型 id，改名会让已保存的选择失效。它也是列表里的第一项。
         "name": "claude-sonnet-4-5",
-        "label": "DeepSeek V4.1 Flash · max",
         "model": "deepseek-v4.1-flash",
         "effort": "max",
+        "supports1m": True,
     },
-    {
-        "name": "claude-opus-4-5",
-        "label": "DeepSeek V4 Pro",
-        "model": "deepseek-v4-pro",
-        "effort": "max",
-    },
-    {
-        "name": "claude-haiku-4-5",
-        "label": "DeepSeek V4 Flash",
-        "model": "deepseek-v4-flash",
-        "effort": "max",
-    },
+]
+
+# 免费模型扫描参数
+DEFAULT_FREE_SCAN = {
+    "enabled": True,
+    # 扫描结果的最长有效期；到期后 /v1/models 会触发一次刷新。
+    # Desktop 每次启动都会 discovery 一次，所以这个值决定"重开就重扫"。
+    "max_age_seconds": 60,
+    # 是否逐个真发请求探通。默认关：直接相信上游 /v1/models 的目录，
+    # 快（一次请求）且不会因为探针超时误删模型；代价是目录里残留的
+    # 下线/地区受限模型也会被列出来，点开才会报错。
+    "probe": False,
+    "list_timeout_seconds": 20,
+    "probe_timeout_seconds": 25,
+    "workers": 16,
+    "docs_url": "https://opencode.ai/v2/docs/console/models/",
+    "extra_candidates": [],
+}
+
+# 能让 Desktop 给出完整 effort 档位（low…max）的名字族。
+# 只有 mythos/fable 系列匹配：发布目录里没有 mythos 条目，所以不会撞名；
+# 而 Desktop 对 mythos 系列会走 C9t 分支，给出 low/medium/high/xhigh/max。
+EFFORT_CAPABLE_RE = re.compile(r"^(?:claude-)?(?:fable|mythos)(?:-|$)")
+
+
+def effort_capable(name: str) -> bool:
+    """这个路由名在 Desktop 里能不能拿到 effort 档位。
+
+    拿不到 effort 档位时，客户端根本不会带 output_config.effort，
+    网关就只能按路由配置强制一个固定值，标签里写死才准确。
+    """
+    return bool(EFFORT_CAPABLE_RE.match(str(name).strip().lower()))
+
+
+# 可分配给新模型的路由名池。
+# 三个硬约束（详见 gateway/ccd_routes.py 顶部说明）：
+#   1. Claude Code CLI 认识（否则 CLI 按 200k 上下文处理并报警告）；
+#   2. CLI 不会把它改写成别的模型（claude-opus-4-0 会被改写成 claude-opus-5-5）；
+#   3. 不与发布目录里的规范名撞名（否则选择器用官方名覆盖我们的显示名）。
+DEFAULT_ROUTE_POOL = [
+    "claude-mythos-5",
+    "claude-mythos-5-1",
+    "claude-mythos-preview",
+    "claude-fable-5-mythos-5",
 ]
 
 DEFAULT_CONFIG = {
@@ -40,19 +76,20 @@ DEFAULT_CONFIG = {
     "upstream_api_key": "",
     "default_effort": "max",
     "local_title_synthesis": False,
+    "local_count_tokens": True,
+    "context_window_tokens": 1000000,
     "upstream_connect_timeout": 30,
     "upstream_read_timeout": 300,
     "upstream_retries": 2,
     "upstream_retry_backoff": 0.6,
-    # 上游模型的真实上下文上限：用于把上游的空壳 400 翻译成可识别的 prompt is too long
-    "upstream_context_limit": 1_000_000,
+    "debug_log_request_body": False,
     "routes": DEFAULT_ROUTES,
+    "free_scan": DEFAULT_FREE_SCAN,
+    # 无论扫描结果如何都必须出现在列表里的模型
+    "pinned_models": [],
+    # 可分配给新模型的路由名池
+    "route_pool": DEFAULT_ROUTE_POOL,
 }
-
-# Claude Code 认的 1M 上下文别名后缀：请求发出前 CLI 会去掉它并附加 context-1m beta，
-# 但模型窗口会从 200K 抬到 1e6，自动压缩才允许设到接近 1M。
-LONG_CONTEXT_SUFFIX = "[1m]"
-LONG_CONTEXT_LABEL = " · 1M"
 
 
 def state_dir() -> pathlib.Path:
@@ -85,16 +122,30 @@ def normalize(data: dict) -> dict:
     config["routes"] = [normalize_route(route) for route in routes if route.get("name")]
     if not config["routes"]:
         raise ValueError("config.routes 不能为空")
+    scan = dict(DEFAULT_FREE_SCAN)
+    scan.update(config.get("free_scan") or {})
+    config["free_scan"] = scan
+    config["pinned_models"] = [str(m) for m in (config.get("pinned_models") or [])]
+    config["route_pool"] = [str(n) for n in (config.get("route_pool") or DEFAULT_ROUTE_POOL)]
     return config
 
 
 def normalize_route(route: dict) -> dict:
-    return {
-        "name": str(route["name"]).strip(),
-        "label": str(route.get("label") or route["name"]),
+    name = str(route["name"]).strip()
+    normalized = {
+        "name": name,
         "model": str(route.get("model") or route["name"]),
         "effort": str(route.get("effort") or DEFAULT_CONFIG["default_effort"]),
+        # 仅在显式声明时保留，交给 Claude Desktop 去开启 1M 上下文变体
+        "supports1m": bool(route.get("supports1m", True)),
+        # 客户端能选 effort 就听客户端的，选不了就用路由配置的固定值
+        "effort_mode": "client" if effort_capable(name) else "fixed",
     }
+    # 只有显式写了 label 才保留；否则交给路由表按上游模型名生成，
+    # 不能回退成路由名（否则选择器里会显示 claude-mythos-7 这种假名字）。
+    if route.get("label"):
+        normalized["label"] = str(route["label"])
+    return normalized
 
 
 def write_config(config: dict, path: pathlib.Path | None = None) -> pathlib.Path:
@@ -107,33 +158,15 @@ def write_config(config: dict, path: pathlib.Path | None = None) -> pathlib.Path
 
 
 def routes_by_name(config: dict) -> dict:
-    return {route["name"]: route for route in expanded_routes(config)}
+    return {route["name"]: route for route in config["routes"]}
 
 
-def with_long_context_variants(routes: list[dict]) -> list[dict]:
-    """为每条路由派生 `[1m]` 别名（桌面端选择器里的 1M 档）。
-
-    幂等：已经存在的别名（无论是派生出来的还是用户手写的）不重复追加。
-    """
-    names = {route["name"] for route in routes}
-    expanded = list(routes)
-    for route in routes:
-        name = route["name"]
-        if name.endswith(LONG_CONTEXT_SUFFIX):
-            continue
-        alias = f"{name}{LONG_CONTEXT_SUFFIX}"
-        if alias in names:
-            continue
-        expanded.append({
-            **route,
-            "name": alias,
-            "label": f"{route['label']}{LONG_CONTEXT_LABEL}",
-        })
-    return expanded
-
-
-def expanded_routes(config: dict) -> list[dict]:
-    return with_long_context_variants(config["routes"])
+def append_log(message: str) -> None:
+    """把网关自己的日志写进 gateway.log。"""
+    path = log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
 
 
 def mask(secret: str) -> str:
@@ -154,6 +187,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--effort", default=None)
     parser.add_argument("--local-title", default=None)
+    parser.add_argument("--local-count-tokens", default=None,
+                        help="on/off：本地估算 /v1/messages/count_tokens")
     parser.add_argument("--require-key", action="store_true", help="show 时若无 key 则以非 0 退出")
     args = parser.parse_args(argv)
 
@@ -168,9 +203,10 @@ def main(argv: list[str]) -> int:
         print(f"  上游         = {config['upstream_base_url']}")
         print(f"  Key          = {mask(config['upstream_api_key'])}")
         print(f"  标题本地应答 = {'on' if config['local_title_synthesis'] else 'off'}")
-        print(f"  上游上下文上限 = {config['upstream_context_limit']} tokens")
-        for route in expanded_routes(config):
-            print(f"  route {route['name']:<22} -> {route['model']} (effort={route['effort']})")
+        print(f"  Token 本地估算 = {'on' if config['local_count_tokens'] else 'off'}")
+        print(f"  上下文窗口   = {config['context_window_tokens']}")
+        for route in config["routes"]:
+            print(f"  route {route['name']:<20} -> {route['model']} (effort={route['effort']})")
         return 0
 
     if args.key is not None:
@@ -183,9 +219,12 @@ def main(argv: list[str]) -> int:
             route["effort"] = args.effort
     if args.local_title is not None:
         config["local_title_synthesis"] = args.local_title == "on"
+    if args.local_count_tokens is not None:
+        config["local_count_tokens"] = args.local_count_tokens == "on"
     write_config(config, path)
     print(f"已写入 {path}（{mask(config['upstream_api_key'])}，端口 {config['port']}，"
-          f"effort={config['default_effort']}，标题本地应答={'on' if config['local_title_synthesis'] else 'off'}）")
+          f"effort={config['default_effort']}，标题本地应答={'on' if config['local_title_synthesis'] else 'off'}，"
+          f"Token 本地估算={'on' if config['local_count_tokens'] else 'off'}）")
     return 0
 
 

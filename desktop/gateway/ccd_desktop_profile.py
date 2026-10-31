@@ -53,18 +53,32 @@ def write_private_json(path: pathlib.Path, payload: dict) -> None:
 
 
 def profile_payload(config: dict) -> dict:
-    return {
+    """生成 3P profile 内容。
+
+    profile 里不写 inferenceModels，Desktop 就会走网关 discovery：
+    每次启动都向网关要一次列表，网关拿最新的扫描结果回答，
+    于是"重新打开就重新扫描"自动成立。
+    """
+    payload = {
         "inferenceProvider": "gateway",
         "inferenceGatewayBaseUrl": f"http://{config['listen']}:{config['port']}",
         "inferenceGatewayApiKey": "local-gateway-key",
         "inferenceGatewayAuthScheme": "x-api-key",
-        "inferenceModels": [{"name": r["name"], "labelOverride": r["label"]}
-                            for r in ccd_config.expanded_routes(config)],
     }
+    if not (config.get("free_scan") or {}).get("enabled", True):
+        # 关掉扫描时才退回静态列表
+        payload["inferenceModels"] = [
+            {**{"name": r["name"], "labelOverride": r.get("label") or r["name"]},
+             **({"supports1m": True} if r.get("supports1m") else {})}
+            for r in config["routes"]
+        ]
+    return payload
 
 
 def apply_profile(config_path: str | None = None) -> int:
     config = ccd_config.load_config(config_path)
+    payload = profile_payload(config)
+    payload_has_models = "inferenceModels" in payload
     pid = profile_id()
     meta_path = library_dir() / "_meta.json"
     meta = read_json(meta_path)
@@ -80,7 +94,8 @@ def apply_profile(config_path: str | None = None) -> int:
     live = read_json(live_config_path())
     live["deploymentMode"] = "3p"
     write_private_json(live_config_path(), live)
-    print(f"已写入 3P profile：{library_dir() / f'{pid}.json'}（appliedId={pid}，deploymentMode=3p）")
+    print(f"已写入 3P profile：{library_dir() / f'{pid}.json'}（appliedId={pid}，deploymentMode=3p，"
+          f"模型列表={'网关 discovery' if not payload_has_models else '静态'}）")
     return 0
 
 
