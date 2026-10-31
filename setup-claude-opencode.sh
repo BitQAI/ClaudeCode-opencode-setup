@@ -26,6 +26,9 @@ MODEL_MAIN_DEFAULT="deepseek-v4.1-flash"
 MODEL_OPUS_DEFAULT="space-bunny-free"
 MODEL_SONNET_DEFAULT="deepseek-v4.1-flash"
 MODEL_HAIKU_DEFAULT="deepseek-v4-flash"
+# 自动压缩窗口（tokens）：Claude Code 会在 `窗口 − 32000(输出预留)` 时压缩。
+# 950000 → 阈值 ~918K，既接近上游 1M，又留出空间给压缩请求自身。
+AUTOCOMPACT_WINDOW_DEFAULT="${OPENCODE_AUTOCOMPACT_WINDOW:-950000}"
 # 默认档（Sonnet）= deepseek-v4.1-flash，推理强度拉满
 EFFORT_DEFAULT="max"
 
@@ -148,12 +151,14 @@ verify_endpoint() {
 apply_settings() {
   mkdir -p "$CLAUDE_DIR"
   "$PYTHON" - "$SETTINGS_FILE" "$API_KEY" "$BASE_URL" \
-      "$MODEL_MAIN" "$MODEL_OPUS" "$MODEL_SONNET" "$MODEL_HAIKU" "$EFFORT" <<'PY'
+      "$MODEL_MAIN" "$MODEL_OPUS" "$MODEL_SONNET" "$MODEL_HAIKU" "$EFFORT" \
+      "$AUTOCOMPACT_WINDOW" <<'PY'
 import json
 import os
 import sys
 
-path, key, base, main, opus, sonnet, haiku, effort = sys.argv[1:9]
+path, key, base, main, opus, sonnet, haiku, effort, autocompact = sys.argv[1:10]
+window = int(autocompact)
 data = {}
 if os.path.exists(path):
     raw = open(path, encoding="utf-8").read().strip()
@@ -170,9 +175,17 @@ env.update({
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku,
     "CLAUDE_CODE_SUBAGENT_MODEL": main,
     "CLAUDE_CODE_EFFORT_LEVEL": effort,
+    # 自动压缩窗口：接近上游 1M 上限时才压缩（Claude Code 阈值 = 窗口 − 32000）
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(window),
+    # 非 claude-* 模型名（本脚本用的是上游真名）需这个才能把模型窗口抬到 1M，
+    # 否则会被钳回默认 200K，导致每 ~16.8 万 tokens 就压一次。
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000",
 })
 # opencode Go 的 /v1/messages 只认 x-api-key，Bearer 会返回 401 Missing API key
 env.pop("ANTHROPIC_AUTH_TOKEN", None)
+
+data["autoCompactEnabled"] = True
+data["autoCompactWindow"] = window
 
 with open(path, "w", encoding="utf-8") as fh:
     json.dump(data, fh, ensure_ascii=False, indent=2)
@@ -265,6 +278,7 @@ do_install() {
   info "  ANTHROPIC_DEFAULT_SONNET_MODEL= $MODEL_SONNET"
   info "  ANTHROPIC_DEFAULT_HAIKU_MODEL = $MODEL_HAIKU"
   info "  CLAUDE_CODE_EFFORT_LEVEL     = $EFFORT"
+  info "  自动压缩窗口                  = $AUTOCOMPACT_WINDOW tokens（阈值 ≈ $((AUTOCOMPACT_WINDOW - 32000))）"
 }
 
 install_self() {
@@ -320,8 +334,10 @@ data = json.load(open(sys.argv[1], encoding="utf-8"))
 env = data.get("env", {})
 for k in ("ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
           "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-          "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"):
+          "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL",
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_MAX_CONTEXT_TOKENS"):
     print(f"  {k:32s}= {env.get(k, '(未设置)')}")
+print(f"  {'autoCompactWindow(settings)':32s}= {data.get('autoCompactWindow', '(未设置)')}")
 api_key = env.get("ANTHROPIC_API_KEY", "")
 print(f"  {'ANTHROPIC_API_KEY':32s}= {api_key[:7]}...{api_key[-4:]}" if api_key else "  ANTHROPIC_API_KEY                = (未设置)")
 print(f"  {'ANTHROPIC_AUTH_TOKEN':32s}= {env.get('ANTHROPIC_AUTH_TOKEN', '(未设置)')}")
@@ -464,6 +480,7 @@ main() {
   MODEL_SONNET="$MODEL_SONNET_DEFAULT"
   MODEL_HAIKU="$MODEL_HAIKU_DEFAULT"
   EFFORT="${OPENCODE_EFFORT:-$EFFORT_DEFAULT}"
+  AUTOCOMPACT_WINDOW="$AUTOCOMPACT_WINDOW_DEFAULT"
 
   case "${1:-}" in
     ""|--install)  do_install ;;
