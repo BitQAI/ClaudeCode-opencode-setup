@@ -11,7 +11,8 @@ This repo ships two parts:
 | Path | Target | Writes to |
 |---|---|---|
 | root (`setup-claude-opencode.sh`) | terminal `claude` CLI, IDE extensions, Claude Desktop's built-in Claude Code sessions | `~/.claude/settings.json` |
-| [`desktop/`](/desktop) (`setup-desktop-opencode.sh`) | Claude Desktop **Chat / Cowork** (third-party inference via a 3P local gateway) | `Claude-3p` profile + `~/.claude-desktop-opencode/` |
+| [`desktop/`](/desktop) (`setup-desktop-opencode.sh`) | Claude Desktop **Chat / Cowork** on macOS (third-party inference via a 3P local gateway) | `Claude-3p` profile + `~/.claude-desktop-opencode/` |
+| [`desktop/windows/`](/desktop/windows) (`setup.mjs`) | Claude Desktop **Chat / Cowork** on Windows 10/11 (same gateway, Node runtime) | `%LOCALAPPDATA%\Claude-3p` profile + `%USERPROFILE%\.claude-desktop-opencode\` |
 
 Also included: [`CLAUDE.md`](/CLAUDE.md) — the engineering guidelines used in this repo (Claude Code picks it up
 automatically when working here), kept identical to `~/.claude/CLAUDE.md`.
@@ -180,7 +181,15 @@ Change it with `--effort low|medium|high|xhigh|max`.
 
 > Note the distinction: the above covers the **Claude Code sessions** inside Desktop (the `Code` tab, which reads
 > `~/.claude/settings.json`). Desktop's **Chat / Cowork** runs on Anthropic server-side inference and needs the
-> 3P local gateway in [`desktop/`](/desktop). The two never interfere and can be installed independently.
+> 3P local gateway. The two never interfere and can be installed independently. The gateway ships one implementation
+> per platform (identical routes, profile layout and log fields):
+>
+> | Platform | Install | Docs |
+> |---|---|---|
+> | macOS | `bash desktop/setup-desktop-opencode.sh` | [`desktop/README.en.md`](/desktop/README.en.md) |
+> | Windows 10/11 | `node desktop/windows/setup.mjs` | [`desktop/windows/README.en.md`](/desktop/windows/README.en.md) |
+>
+> Both expose `claude-*[1m]` (1M context) entries — pick a `· 1M` slot for long sessions.
 
 ---
 
@@ -324,6 +333,7 @@ but three constraints were measured: Desktop **only accepts Anthropic-style mode
 `deepseek-v4.1-flash` + `max`.**
 
 ```bash
+# macOS
 git clone https://github.com/BitQAI/ClaudeCode-opencode-setup.git
 cd ClaudeCode-opencode-setup/desktop
 bash setup-desktop-opencode.sh           # install (prompts for the key on first run)
@@ -331,7 +341,17 @@ bash setup-desktop-opencode.sh --status  # status
 bash setup-desktop-opencode.sh --restore # roll back
 ```
 
-Details, measurements and troubleshooting: [desktop/README.en.md](/desktop/README.en.md).
+```bat
+:: Windows 10/11 (Node 18+)
+git clone https://github.com/BitQAI/ClaudeCode-opencode-setup.git
+cd ClaudeCode-opencode-setup\desktop\windows
+node setup.mjs
+node setup.mjs --status
+node setup.mjs --restore
+```
+
+Details, measurements and troubleshooting: [desktop/README.en.md](/desktop/README.en.md) (macOS) and
+[desktop/windows/README.en.md](/desktop/windows/README.en.md) (Windows).
 
 - The gateway binds `127.0.0.1` only; the key lives in `~/.claude-desktop-opencode/config.json` (`600`) and the
   Desktop profile carries a placeholder key.

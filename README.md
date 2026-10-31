@@ -11,7 +11,8 @@
 | 目录 | 目标 | 写到哪里 |
 |---|---|---|
 | 根目录（`setup-claude-opencode.sh`） | 终端 `claude` CLI、IDE 扩展、桌面端内置的 Claude Code 会话 | `~/.claude/settings.json` |
-| [`desktop/`](/desktop)（`setup-desktop-opencode.sh`） | Claude Desktop 的 **Chat / Cowork**（第三方推理 3P 本地网关） | `Claude-3p` profile + `~/.claude-desktop-opencode/` |
+| [`desktop/`](/desktop)（`setup-desktop-opencode.sh`） | Claude Desktop 的 **Chat / Cowork**（macOS，3P 本地网关） | `Claude-3p` profile + `~/.claude-desktop-opencode/` |
+| [`desktop/windows/`](/desktop/windows)（`setup.mjs`） | Claude Desktop 的 **Chat / Cowork**（Windows 10/11，同一个网关，Node 运行时） | `%LOCALAPPDATA%\Claude-3p` profile + `%USERPROFILE%\.claude-desktop-opencode\` |
 
 另附 [`CLAUDE.md`](/CLAUDE.md)：本仓库使用的工程准则（Claude Code 在这个目录下会自动读取），与 `~/.claude/CLAUDE.md` 保持同一份内容。
 注意它**只管 Claude Code**：桌面端 Chat / Cowork 不读文件系统里的 `CLAUDE.md`，要用设置里的 **Instructions for Claude**（存储位置与形式见 [desktop/README.md 6.1](/desktop/README.md)）。
@@ -179,8 +180,15 @@ Claude Code 的自动压缩阈值是 `窗口 − 32000`（输出预留），而*
 4. 改完配置需**完全退出并重启 Claude.app**，否则它继续用旧的环境快照。
 
 > 注意区分：以上说的是桌面端里跑的 **Claude Code 会话**（`Code` 标签，读 `~/.claude/settings.json`）。
-> 桌面端的 **Chat / Cowork** 走的是服务端推理，需要 [`desktop/`](/desktop) 里的 3P 本地网关方案，
-> 两者互不影响，可分别安装。
+> 桌面端的 **Chat / Cowork** 走的是服务端推理，需要 3P 本地网关方案，两者互不影响，可分别安装。
+> 网关方案按平台提供两套实现（语义、路由、profile 结构一致）：
+>
+> | 平台 | 安装 | 文档 |
+> |---|---|---|
+> | macOS | `bash desktop/setup-desktop-opencode.sh` | [`desktop/README.md`](/desktop/README.md) |
+> | Windows 10/11 | `node desktop/windows/setup.mjs` | [`desktop/windows/README.md`](/desktop/windows/README.md) |
+>
+> 两套的模型列表都含 `claude-*[1m]`（1M 上下文档），长会话请选带 `· 1M` 的条目。
 
 ### 完成
 
@@ -392,6 +400,7 @@ Claude Desktop 的 Chat / Projects / Cowork 是 **Anthropic 服务端推理**，
 并强制 `effort=max`，再转发到 OpenCode Go。**Sonnet 槽位默认就是 `deepseek-v4.1-flash` + `max`。**
 
 ```bash
+# macOS
 git clone https://github.com/BitQAI/ClaudeCode-opencode-setup.git
 cd ClaudeCode-opencode-setup/desktop
 bash setup-desktop-opencode.sh           # 安装（首次会问 Key）
@@ -399,8 +408,21 @@ bash setup-desktop-opencode.sh --status  # 查看状态
 bash setup-desktop-opencode.sh --restore # 一键还原
 ```
 
-细节、实测证据与排错见 [desktop/README.md](/desktop/README.md)：
+```bat
+:: Windows 10/11（Node 18+）
+git clone https://github.com/BitQAI/ClaudeCode-opencode-setup.git
+cd ClaudeCode-opencode-setup\desktop\windows
+node setup.mjs                           :: 安装（首次会问 Key）
+node setup.mjs --status                  :: 查看状态 + 计划任务 + 自检
+node setup.mjs --restore                 :: 一键还原
+```
 
-- 网关只监听 `127.0.0.1`，Key 存在 `~/.claude-desktop-opencode/config.json`（`600`），桌面端 profile 里放的是占位 Key；
+细节、实测证据与排错：macOS 见 [desktop/README.md](/desktop/README.md)，Windows 见
+[desktop/windows/README.md](/desktop/windows/README.md)（含两平台路径/自启/日志的逐项对照）。
+
+以下要点两平台一致（下面以 macOS 路径示例）：
+
+- 网关只监听 `127.0.0.1`，Key 存在 `~/.claude-desktop-opencode/config.json`（`600`，Windows 为
+  `%USERPROFILE%\.claude-desktop-opencode\config.json`），桌面端 profile 里放的是占位 Key；
 - **不需要自签证书**：桌面端接受 loopback 上的 http（实测 `allowLoopbackHttp: true`），比"必须套 HTTPS"的方案少动一层系统；
 - 每个新会话会多一笔"标题生成"请求（走 Haiku 槽）；默认保持官方行为，`--local-title on` 可让网关本地应答，省掉这一笔。

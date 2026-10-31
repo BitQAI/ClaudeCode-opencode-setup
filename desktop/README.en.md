@@ -4,14 +4,25 @@
 > [ClaudeCode-opencode-setup](https://github.com/BitQAI/ClaudeCode-opencode-setup).
 > For the terminal `claude` CLI and IDE extensions use `setup-claude-opencode.sh` in the repo root.
 
-Run the official **Claude Desktop** app (macOS) on **OpenCode Go**'s DeepSeek models.
+**Each platform has its own implementation with identical semantics (same routes, profile layout, log fields):**
+
+| Platform | Entry point | Runtime | Autostart | Docs |
+|---|---|---|---|---|
+| **macOS** | [`setup-desktop-opencode.sh`](./setup-desktop-opencode.sh) | `python3` (stdlib) | LaunchAgent (`KeepAlive`) | this file |
+| **Windows 10/11** | [`windows/setup.mjs`](./windows/setup.mjs) | Node 18+ | scheduled task + `HKCU\...\Run` (`supervise`) | [`windows/README.en.md`](./windows/README.en.md) |
+
+The rest of this file describes the macOS edition (commands, paths, log locations); the Windows equivalents
+(`%USERPROFILE%\.claude-desktop-opencode\`, `%LOCALAPPDATA%\Claude-3p\`, …) are listed side by side in
+[`windows/README.en.md`](./windows/README.en.md).
+
+Run the official **Claude Desktop** app on **OpenCode Go**'s DeepSeek models.
 The Sonnet slot maps to `deepseek-v4.1-flash` with reasoning effort fixed to `max`.
 
 ```
 Claude Desktop (third-party inference / Gateway mode)
         │  http://127.0.0.1:8799
         ▼
-local gateway (Python 3 stdlib, loopback only)
+local gateway (Python 3 stdlib on macOS, Node on Windows; loopback only)
         │  rewrite model + force effort=max + inject session header
         ▼
 https://opencode.ai/zen/go/v1/messages

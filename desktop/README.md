@@ -3,14 +3,24 @@
 > 本目录是 [ClaudeCode-opencode-setup](https://github.com/BitQAI/ClaudeCode-opencode-setup) 的**桌面端**部分。
 > 终端 `claude` CLI 与 IDE 扩展请用仓库根目录的 `setup-claude-opencode.sh`。
 
-让 **Claude Desktop**（官方 App，macOS）跑在 **OpenCode Go** 的 DeepSeek 模型上：
+**两个平台各有一套实现，语义一致（同一套路由、profile 结构、日志字段）：**
+
+| 平台 | 入口 | 运行时 | 自启 | 文档 |
+|---|---|---|---|---|
+| **macOS** | [`setup-desktop-opencode.sh`](./setup-desktop-opencode.sh) | `python3`（标准库） | LaunchAgent（`KeepAlive`） | 本文（下方内容均指 macOS） |
+| **Windows 10/11** | [`windows/setup.mjs`](./windows/setup.mjs) | Node 18+ | 计划任务 + `HKCU\...\Run`（`supervise` 守护） | [`windows/README.md`](./windows/README.md) |
+
+下文以 macOS 为例（命令、路径、日志位置）；Windows 的对应差异（`%USERPROFILE%\.claude-desktop-opencode\`、
+`%LOCALAPPDATA%\Claude-3p\` 等）在 [`windows/README.md`](./windows/README.md) 里逐项对照。
+
+让 **Claude Desktop**（官方 App）跑在 **OpenCode Go** 的 DeepSeek 模型上：
 默认的 Sonnet 槽位对应 `deepseek-v4.1-flash`，推理强度固定 `max`。
 
 ```
 Claude Desktop（第三方推理 / Gateway 模式）
         │  http://127.0.0.1:8799
         ▼
-本地网关（Python 3 标准库，仅监听 127.0.0.1）
+本地网关（Python 3 标准库，仅监听 127.0.0.1；Windows 版为 Node）
         │  改写 model + 强制 effort=max + 注入会话头
         ▼
 https://opencode.ai/zen/go/v1/messages
