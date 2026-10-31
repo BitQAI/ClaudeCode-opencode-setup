@@ -122,12 +122,35 @@ bash ~/.claude/claude-opencode-setup/setup-claude-opencode.sh --status
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4.1-flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
     "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash",
-    "CLAUDE_CODE_EFFORT_LEVEL": "max"
-  }
+    "CLAUDE_CODE_EFFORT_LEVEL": "max",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "950000",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000"
+  },
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 950000
 }
 ```
 
 > 原有 `permissions` / `hooks` / `model` / `skipDangerousModePermissionPrompt` 等字段保持不变。
+
+#### 上下文与自动压缩（为什么是 950000）
+
+`deepseek-v4.1-flash` 的上游上下文是 **1,000,000 tokens**，超过后 OpenCode Go 只回一个空壳
+`400 {"model":"deepseek-v4.1-flash"}`（没有 `error.message`），Claude Code 认不出 `prompt is too long` 就不会做
+反应式压缩，界面只剩 `Invalid request / The request couldn't be completed.`。
+
+Claude Code 的自动压缩阈值是 `窗口 − 32000`（输出预留），而**窗口会被模型自身上下文窗口钳制**。
+所以只写 `autoCompactWindow` 不够：
+
+| 配置 | 作用 |
+|---|---|
+| `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000` | 脚本用的模型名不是 `claude-*`，该值才生效，把模型窗口从默认 200K 抬到 1M |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW=950000` / `autoCompactWindow` | 压缩窗口，阈值 ≈ 950000 − 32000 = **约 91.8 万** 才压缩 |
+
+不设这两项时窗口是 200K，阈值只有 **16.8 万**，长会话会被频繁压缩（实测 `preTokens ≈ 167000~169000`）。
+想换阈值：`OPENCODE_AUTOCOMPACT_WINDOW=900000 bash setup-claude-opencode.sh`，重装后生效。
+
+> 不要设到 1000000：压缩动作本身要把整段历史 + 摘要指令 + 32000 输出装进一次请求，顶到 1M 会直接撞上游上限。
 
 ### 模型档位映射（默认档 = Sonnet）
 

@@ -56,6 +56,13 @@ a loopback process that only translates.
 | `claude-sonnet-4-5` | DeepSeek V4.1 Flash · max | `deepseek-v4.1-flash` | `max` |
 | `claude-opus-4-5` | DeepSeek V4 Pro | `deepseek-v4-pro` | `max` |
 | `claude-haiku-4-5` | DeepSeek V4 Flash | `deepseek-v4-flash` | `max` |
+| `claude-sonnet-4-5[1m]` | DeepSeek V4.1 Flash · max · 1M | `deepseek-v4.1-flash` | `max` |
+| `claude-opus-4-5[1m]` | DeepSeek V4 Pro · 1M | `deepseek-v4-pro` | `max` |
+| `claude-haiku-4-5[1m]` | DeepSeek V4 Flash · 1M | `deepseek-v4-flash` | `max` |
+
+**Pick a `· 1M` entry for long sessions.** `[1m]` is Claude Code's built-in long-context alias; the gateway derives it
+for every route, and the CLI strips it before the request leaves the machine, so the upstream never sees it.
+Without it the auto-compact window is clamped to 200K and long sessions compact every **~168K tokens** (see §7).
 
 **The default (Sonnet) slot is `deepseek-v4.1-flash` + `max`**, working out of the box.
 Change effort for all slots with `--effort`, or edit `routes` in `~/.claude-desktop-opencode/config.json`.
@@ -197,6 +204,9 @@ Measured on 2026-09-14 (Desktop `1.52386.6`, 3P mode):
 | A single request takes tens of seconds | make sure the gateway is current: non-stream replies must carry an explicit `content-length` (older builds omitted it and clients waited for the connection to close) |
 | Port already in use | switch with `--port 8899`; the profile is updated to match |
 | Config change not applied | the LaunchAgent is reloaded on change; if not, rerun the installer without arguments |
+| `Invalid request / The request couldn't be completed.` with `{"model":"deepseek-v4.1-flash"}` | the session prompt exceeded the **1,000,000 token** upstream limit. OpenCode Go answers with a bare `400` that carries no `error.message` (small requests with the same model work, and `/v1/models` / `count_tokens` are fine, so it is not the model id or the gateway). `/compact` or start a new session; see the next row for the permanent fix |
+| Long sessions compact every ~168K tokens | the auto-compact window is **clamped to the model window** (`min(setting, model window)`); `claude-sonnet-4-5` is 200K, so the threshold is 200000 − 32000 = 168K (measured `preTokens ≈ 167000~169000`). Switch to a `· 1M` entry (`claude-*-[1m]`, window 1e6); the terminal script already writes `CLAUDE_CODE_AUTO_COMPACT_WINDOW=950000` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000` → threshold ≈ 918K |
+| Which error is it really? | `grep upstream_body ~/.claude-desktop-opencode/gateway.log`: the gateway now logs the upstream body of every 4xx/5xx (truncated to 600 chars). A `rewrite upstream 400 -> prompt_too_long` line means it was translated into `prompt is too long: N tokens > 1000000 maximum`, which Claude Code can act on by compacting and retrying |
 | After `--restore` Desktop still points at the old gateway | the backup is a snapshot taken **at install time**; if another tool had already rewritten the `Default` entry, that is what gets restored. Check `~/.claude-desktop-opencode/backup/Claude-3p/configLibrary/`: the stock `Default` profile is `{}` and `claude_desktop_config.json` has no `deploymentMode` |
 
 Logs are always redacted: route id, rewritten model, status code and latency only — never keys, tokens or bodies.

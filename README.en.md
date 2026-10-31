@@ -123,10 +123,34 @@ Resulting `~/.claude/settings.json`:
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4.1-flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
     "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4.1-flash",
-    "CLAUDE_CODE_EFFORT_LEVEL": "max"
-  }
+    "CLAUDE_CODE_EFFORT_LEVEL": "max",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "950000",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000"
+  },
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 950000
 }
 ```
+
+#### Context window and auto-compaction (why 950000)
+
+`deepseek-v4.1-flash` has a **1,000,000 token** upstream context. Past that limit OpenCode Go answers with a bare
+`400 {"model":"deepseek-v4.1-flash"}` (no `error.message`), so Claude Code cannot recognise `prompt is too long`,
+never compacts reactively, and the UI only shows `Invalid request / The request couldn't be completed.`
+
+Claude Code compacts at `window − 32000` (output reservation), and the window is **clamped to the model's own
+context window**, so writing `autoCompactWindow` alone is not enough:
+
+| Setting | Effect |
+|---|---|
+| `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000` | only honoured for non `claude-*` model ids (that is what this script uses); raises the model window from the 200K default to 1M |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW=950000` / `autoCompactWindow` | compaction window; threshold ≈ 950000 − 32000 = **~918K tokens** |
+
+Without them the window is 200K and the threshold only **168K**, so long sessions compact constantly
+(measured `preTokens ≈ 167000~169000`). To change it: `OPENCODE_AUTOCOMPACT_WINDOW=900000 bash setup-claude-opencode.sh`.
+
+> Do not set 1000000: the compaction request itself has to carry the whole history plus the summary instruction plus
+> 32000 output tokens, so it would hit the upstream limit again.
 
 Restart Claude Code (open a new terminal) and run `claude` in any project.
 

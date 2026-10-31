@@ -56,6 +56,13 @@ https://opencode.ai/zen/go/v1/messages
 | `claude-sonnet-4-5` | DeepSeek V4.1 Flash · max | `deepseek-v4.1-flash` | `max` |
 | `claude-opus-4-5` | DeepSeek V4 Pro | `deepseek-v4-pro` | `max` |
 | `claude-haiku-4-5` | DeepSeek V4 Flash | `deepseek-v4-flash` | `max` |
+| `claude-sonnet-4-5[1m]` | DeepSeek V4.1 Flash · max · 1M | `deepseek-v4.1-flash` | `max` |
+| `claude-opus-4-5[1m]` | DeepSeek V4 Pro · 1M | `deepseek-v4-pro` | `max` |
+| `claude-haiku-4-5[1m]` | DeepSeek V4 Flash · 1M | `deepseek-v4-flash` | `max` |
+
+**缩放上下文就用 `[1m]` 那一档**（下面 §7 有完整推理）：`[1m]` 是 Claude Code 内置的 1M 别名，
+由网关自动为每条路由派生，无需手写配置；CLI 发请求前会把它去掉，所以上游完全感知不到。
+长会话建议选带 `· 1M` 的档位，否则自动压缩会按 200K 窗口在 **每 ~16.8 万 tokens** 触发一次。
 
 **默认槽位（Sonnet）就是 `deepseek-v4.1-flash` + `max`**，开箱即用。
 三个槽位都能通过 `--effort` 统一改强度，或直接编辑 `~/.claude-desktop-opencode/config.json` 里的 `routes`。
@@ -191,6 +198,9 @@ bash setup-desktop-opencode.sh --local-title on
 | 单个请求耗时数十秒 | 确认网关是最新代码：非流式响应必须显式带 `content-length`（旧版会漏掉长度，客户端只能干等连接关闭） |
 | 端口被占用 | `--port 8899` 换端口，脚本会同步更新 profile |
 | 改完配置没生效 | 配置改动会触发 LaunchAgent 重载；若仍不生效，`bash setup-desktop-opencode.sh` 重跑一次 |
+| 报 `Invalid request / The request couldn't be completed.` 且附带 `{"model":"deepseek-v4.1-flash"}` | **会话 prompt 超过上游 1,000,000 tokens 上限**：OpenCode Go 只回空壳 400，没有 `error.message`（同名小请求一切正常，`/v1/models`、`count_tokens` 也都正常，所以不是模型名或网关的问题）。压缩不了就 `/compact` 或开新会话；根治看下一条 |
+| 长会话每 ~16.8 万 tokens 就 compact 一次 | 自动压缩窗口被**模型窗口钳制**（`min(设置窗口, 模型窗口)`），`claude-sonnet-4-5` 是 200K，阀值 = 200000 − 32000 = 168K（实测 `preTokens ≈ 167000~169000`）。改用带 `· 1M` 的档位（`claude-*-[1m]`，窗口 1e6）；终端侧脚本已写入 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=950000` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000`，阀值 ≈ 918K |
+| 想确认到底是哪种错 | `grep upstream_body ~/.claude-desktop-opencode/gateway.log`：网关现在会把 4xx/5xx 的上游响应体（截断 600 字）一并记下来；若日志出现 `rewrite upstream 400 -> prompt_too_long`，说明网关已把它翻译成 Claude Code 能识别的 `prompt is too long: N tokens > 1000000 maximum`，从而能自动压缩重试 |
 | 还原后想再回来 | 备份在 `~/.claude-desktop-opencode/backup/`，重跑无参安装即可 |
 | `--restore` 后桌面端仍指向旧网关 | 备份是**安装那一刻**的快照。若安装前已被别的工具改过（例如把 `Default` 条目也写成了 gateway 配置），还原得到的就是那个状态。检查 `~/.claude-desktop-opencode/backup/Claude-3p/configLibrary/` 里 `Default` 的 profile：官方默认应为 `{}`，`claude_desktop_config.json` 不含 `deploymentMode` |
 
