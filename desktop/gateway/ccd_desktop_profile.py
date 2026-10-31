@@ -59,7 +59,7 @@ def profile_payload(config: dict) -> dict:
         "inferenceGatewayApiKey": "local-gateway-key",
         "inferenceGatewayAuthScheme": "x-api-key",
         "inferenceModels": [{"name": r["name"], "labelOverride": r["label"]}
-                            for r in config["routes"]],
+                            for r in ccd_config.expanded_routes(config)],
     }
 
 

@@ -44,8 +44,15 @@ DEFAULT_CONFIG = {
     "upstream_read_timeout": 300,
     "upstream_retries": 2,
     "upstream_retry_backoff": 0.6,
+    # 上游模型的真实上下文上限：用于把上游的空壳 400 翻译成可识别的 prompt is too long
+    "upstream_context_limit": 1_000_000,
     "routes": DEFAULT_ROUTES,
 }
+
+# Claude Code 认的 1M 上下文别名后缀：请求发出前 CLI 会去掉它并附加 context-1m beta，
+# 但模型窗口会从 200K 抬到 1e6，自动压缩才允许设到接近 1M。
+LONG_CONTEXT_SUFFIX = "[1m]"
+LONG_CONTEXT_LABEL = " · 1M"
 
 
 def state_dir() -> pathlib.Path:
@@ -100,7 +107,33 @@ def write_config(config: dict, path: pathlib.Path | None = None) -> pathlib.Path
 
 
 def routes_by_name(config: dict) -> dict:
-    return {route["name"]: route for route in config["routes"]}
+    return {route["name"]: route for route in expanded_routes(config)}
+
+
+def with_long_context_variants(routes: list[dict]) -> list[dict]:
+    """为每条路由派生 `[1m]` 别名（桌面端选择器里的 1M 档）。
+
+    幂等：已经存在的别名（无论是派生出来的还是用户手写的）不重复追加。
+    """
+    names = {route["name"] for route in routes}
+    expanded = list(routes)
+    for route in routes:
+        name = route["name"]
+        if name.endswith(LONG_CONTEXT_SUFFIX):
+            continue
+        alias = f"{name}{LONG_CONTEXT_SUFFIX}"
+        if alias in names:
+            continue
+        expanded.append({
+            **route,
+            "name": alias,
+            "label": f"{route['label']}{LONG_CONTEXT_LABEL}",
+        })
+    return expanded
+
+
+def expanded_routes(config: dict) -> list[dict]:
+    return with_long_context_variants(config["routes"])
 
 
 def mask(secret: str) -> str:
@@ -135,8 +168,9 @@ def main(argv: list[str]) -> int:
         print(f"  上游         = {config['upstream_base_url']}")
         print(f"  Key          = {mask(config['upstream_api_key'])}")
         print(f"  标题本地应答 = {'on' if config['local_title_synthesis'] else 'off'}")
-        for route in config["routes"]:
-            print(f"  route {route['name']:<20} -> {route['model']} (effort={route['effort']})")
+        print(f"  上游上下文上限 = {config['upstream_context_limit']} tokens")
+        for route in expanded_routes(config):
+            print(f"  route {route['name']:<22} -> {route['model']} (effort={route['effort']})")
         return 0
 
     if args.key is not None:

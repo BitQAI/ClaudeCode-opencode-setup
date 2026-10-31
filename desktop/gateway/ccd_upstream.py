@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
 import urllib.parse
 import uuid
 
@@ -124,3 +125,25 @@ def title_message(model: str, title: str) -> dict:
         "stop_reason": "end_turn", "stop_sequence": None,
         "usage": {"input_tokens": 0, "output_tokens": 0},
     }
+
+
+def estimate_tokens(payload: dict) -> int:
+    """粗估 prompt token 数（英文约 4 字符/token，中日文约 1.5 字符/token）。
+
+    实测会偏大 15~20%，仅用于"是否接近上游上限"的判定与提示文案，不参与计费与路由。
+    """
+    text = json.dumps({
+        "system": payload.get("system") or "",
+        "messages": payload.get("messages") or [],
+        "tools": payload.get("tools") or [],
+    }, ensure_ascii=False)
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff" or "\u3040" <= ch <= "\u30ff")
+    rest = len(text) - cjk
+    return max(1, math.ceil(rest / 4 + cjk / 1.5))
+
+
+def is_opaque_error_body(raw: str) -> bool:
+    """上游对 "prompt 超限" 只回空壳 JSON（如 {"model":"deepseek-v4.1-flash"}），没有任何 error 信息。"""
+    if len(raw) <= 200:
+        return True
+    return raw.lstrip().startswith('{"model"')

@@ -28,6 +28,8 @@ HOP_BY_HOP = {
 # 否则非流式响应会出现"既无长度也无 chunked"的歧义，客户端只能干等连接关闭。
 DROP_HEADERS = HOP_BY_HOP | {"content-length", "server", "date"}
 CHUNK = 2048
+# 上游错误体只记这么多字符（也只读这么多）：足够看清楚原因，不堆日志
+ERROR_BODY_LIMIT = 600
 
 
 def append_log(message: str) -> None:
@@ -78,7 +80,8 @@ class Gateway(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path.rstrip("/").endswith("/v1/models"):
             data = [{"type": "model", "id": r["name"], "display_name": r["label"],
-                     "created_at": "2026-01-01T00:00:00Z"} for r in self.config["routes"]]
+                     "created_at": "2026-01-01T00:00:00Z"}
+                    for r in ccd_config.expanded_routes(self.config)]
             append_log(f"GET /v1/models -> {len(data)} routes")
             self.send_json(200, {"data": data, "has_more": False,
                                  "first_id": data[0]["id"], "last_id": data[-1]["id"]})
@@ -135,6 +138,9 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             self.send_error_json(502, "api_error", f"upstream unreachable: {last_error}")
             return
         try:
+            if response.status >= 400:
+                self.respond_upstream_error(response, payload, path, route, requested, started)
+                return
             streaming = "text/event-stream" in (response.getheader("content-type") or "")
             self.relay(response, streaming)
             elapsed = int((time.time() - started) * 1000)
@@ -168,6 +174,29 @@ class Gateway(http.server.BaseHTTPRequestHandler):
                 break
             self.wfile.write(b"%x\r\n" % len(chunk) + chunk + b"\r\n")
         self.wfile.write(b"0\r\n\r\n")
+
+    # ---- upstream 4xx/5xx --------------------------------------------
+    def respond_upstream_error(self, response, payload: dict, path: str,
+                               route: dict, requested: str, started: float) -> None:
+        raw = (response.read(ERROR_BODY_LIMIT) or b"").decode("utf-8", "replace")
+        raw = " ".join(raw.split())[:ERROR_BODY_LIMIT]
+        elapsed = int((time.time() - started) * 1000)
+        append_log(f"POST {path} {requested} -> {route['model']} "
+                   f"effort={route['effort']} status={response.status} {elapsed}ms "
+                   f"upstream_body={json.dumps(raw, ensure_ascii=False)}")
+        limit = int(self.config.get("upstream_context_limit") or 1_000_000)
+        estimated = ccd_upstream.estimate_tokens(payload)
+        # 上游对上下文超限只回空壳 JSON，客户端认不出 prompt_too_long 就不会做反应式压缩，
+        # 界面上只剩 “Invalid request / The request couldn't be completed.”。
+        if (response.status in (400, 413) and ccd_upstream.is_opaque_error_body(raw)
+                and estimated > limit * 0.95):
+            append_log(f"rewrite upstream {response.status} -> prompt_too_long "
+                       f"(estimated {estimated} tokens, limit {limit})")
+            self.send_error_json(400, "invalid_request_error",
+                                 f"prompt is too long: {estimated} tokens > {limit} maximum")
+            return
+        detail = raw[:300] or "empty body"
+        self.send_error_json(response.status, "api_error", f"upstream {response.status}: {detail}")
 
     # ---- optional local title -----------------------------------------
     def send_local_title(self, route: dict, payload: dict) -> None:
